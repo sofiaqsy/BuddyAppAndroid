@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Buddy</string>
+
+    <!-- Tabs — misma terminología que iOS -->
+    <string name="tab_inicio">Inicio</string>
+    <string name="tab_trips">Tu trip</string>
+    <string name="tab_conexiones">Conexiones</string>
+    <string name="tab_yo">Yo</string>
+</resources>
