@@ -55,28 +55,49 @@ class MatchingViewModel @Inject constructor(
         }
     }
 
+    /** Aviso del flujo pioneer — espejo de pioneerConfirmation (iOS). */
+    private val _pioneerConfirmation = MutableStateFlow<String?>(null)
+    val pioneerConfirmation: StateFlow<String?> = _pioneerConfirmation.asStateFlow()
+
     /**
-     * Flujo pioneer por GPS — espejo de pioneerHelpFlow (iOS): sin destino
-     * curado, resuelve/crea el Place con las coords, crea el trip GPS-only
-     * y lanza la solicitud con el journey.
+     * Flujo pioneer — espejo EXACTO de pioneerHelpFlow (iOS): sin buddies no
+     * hay nada que buscar, así que NO abre el modal de búsqueda. Crea el trip
+     * (curado o GPS-only) + la solicitud en silencio, muestra la confirmación
+     * y el caller navega a "Tu trip".
      */
-    fun findBuddyPioneer(lat: Double, lng: Double, category: String, description: String? = null) {
-        if (_state.value is SearchState.Searching) return
+    fun pioneerRegister(
+        destinationId: String?,
+        lat: Double?,
+        lng: Double?,
+        category: String,
+        cityName: String?,
+        onDone: () -> Unit,
+    ) {
         viewModelScope.launch {
             try {
-                val journey = tripRepo.ensureActiveTripForGps(lat, lng)
-                startRequest(
+                val journey = when {
+                    destinationId != null -> tripRepo.ensureActiveTrip(destinationId)
+                    lat != null && lng != null -> tripRepo.ensureActiveTripForGps(lat, lng)
+                    else -> return@launch
+                }
+                repo.createHelpRequest(
                     destinationId = journey.destination?.id ?: journey.destinationId,
                     category = category,
-                    description = description,
                     journeyId = journey.id,
                 )
+                val city = cityName ?: "tu zona"
+                _pioneerConfirmation.value =
+                    "Registramos tu solicitud en $city. Te avisaremos cuando haya un buddy disponible."
+                delay(500)   // igual que el asyncAfter(0.5) de iOS
+                onDone()
             } catch (e: Exception) {
                 Log.e(TAG, "pioneer flow failed", e)
                 _state.value = SearchState.Failed("No pudimos enviar tu solicitud. Inténtalo de nuevo.")
             }
         }
     }
+
+    fun clearPioneerConfirmation() { _pioneerConfirmation.value = null }
 
     private fun startRequest(destinationId: String?, category: String, description: String?, journeyId: String?) {
         viewModelScope.launch {

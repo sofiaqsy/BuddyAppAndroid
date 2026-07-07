@@ -121,6 +121,24 @@ fun InicioScreen(
 
         if (state.loadFailed) RetryRow(onRetry = viewModel::load)
 
+        // Confirmación pioneer — espejo del banner pioneerConfirmation (iOS)
+        val pioneerNote by matchingViewModel.pioneerConfirmation.collectAsState()
+        if (pioneerNote != null) {
+            Row(
+                Modifier
+                    .padding(horizontal = Spacing.edge)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(Radius.md))
+                    .background(BuddyColor.Accent.copy(alpha = 0.10f))
+                    .border(1.dp, BuddyColor.Accent.copy(alpha = 0.3f), RoundedCornerShape(Radius.md))
+                    .clickable { matchingViewModel.clearPioneerConfirmation() }
+                    .padding(Spacing.md),
+            ) {
+                Text(pioneerNote!!, style = BuddyType.Footnote, color = BuddyColor.Ink)
+            }
+            Spacer(Modifier.height(Spacing.sm))
+        }
+
         // ── Composer (con o sin trip — mismo layout, distinto destino) ─────
         Column(Modifier.padding(horizontal = Spacing.edge).alpha(if (isFindingBuddy) 0.5f else 1f)) {
             LocationContext(
@@ -143,18 +161,21 @@ fun InicioScreen(
                     // buddy activo → seguir la conversación; pioneer con destino →
                     // trip + solicitud y a "Tu trip"; pioneer sin destino pero con
                     // GPS → pioneerHelpFlow; sin nada → registro de trip.
+                    val isPioneer = state.communityContext?.totalBuddies == 0
                     when {
                         state.activeBuddyName != null -> onOpenConexiones()
-                        state.communityContext?.totalBuddies == 0 && state.destinationId != null -> {
-                            matchingViewModel.findBuddy(state.destinationId!!, category)
-                            onOpenTrips()
-                        }
+                        // Pioneer: sin buddies no hay nada que buscar — registra
+                        // trip + solicitud en silencio y navega a "Tu trip" (iOS).
+                        isPioneer && (state.destinationId != null || state.userLat != null) ->
+                            matchingViewModel.pioneerRegister(
+                                destinationId = state.destinationId,
+                                lat = state.userLat, lng = state.userLng,
+                                category = category,
+                                cityName = state.destinationName,
+                                onDone = onOpenTrips,
+                            )
                         state.destinationId != null ->
                             matchingViewModel.findBuddy(state.destinationId!!, category)
-                        state.userLat != null && state.userLng != null -> {
-                            matchingViewModel.findBuddyPioneer(state.userLat!!, state.userLng!!, category)
-                            onOpenTrips()
-                        }
                         else -> onOpenTrips()   // sin ubicación: registrar trip a mano (como iOS)
                     }
                 },
