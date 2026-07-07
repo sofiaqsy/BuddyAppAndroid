@@ -76,6 +76,15 @@ fun TripsScreen(
     var showCancelConfirm by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<ApiJourney?>(null) }
 
+    // Registro a pantalla completa — espejo del navigation push de iOS
+    if (state.showRegisterSheet) {
+        com.buddy.app.features.trips.register.RegisterTripScreen(
+            onCreated = { viewModel.closeRegister(); viewModel.load() },
+            onBack = viewModel::closeRegister,
+        )
+        return
+    }
+
     Column(
         modifier.fillMaxSize().background(BuddyColor.Canvas).verticalScroll(rememberScrollState()),
     ) {
@@ -139,14 +148,6 @@ fun TripsScreen(
         Spacer(Modifier.height(100.dp))
     }
 
-    if (state.showRegisterSheet) {
-        RegisterTripSheet(
-            results = state.searchResults,
-            onQueryChange = viewModel::search,
-            onSelect = viewModel::registerTrip,
-            onDismiss = viewModel::closeRegister,
-        )
-    }
 
     // Confirmación "¿Cancelar tu viaje?" — misma copy que iOS
     if (showCancelConfirm) {

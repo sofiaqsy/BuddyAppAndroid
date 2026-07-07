@@ -67,9 +67,13 @@ interface HomeApi {
 data class CreateJourneyBody(
     @kotlinx.serialization.SerialName("destination_id") val destinationId: String? = null,
     @kotlinx.serialization.SerialName("place_id") val placeId: String? = null,
+    @kotlinx.serialization.SerialName("osm_id") val osmId: String? = null,
     val lat: Double? = null,
     val lng: Double? = null,
     val title: String? = null,
+    @kotlinx.serialization.SerialName("arrival_at") val arrivalAt: String? = null,
+    @kotlinx.serialization.SerialName("knows_how_to_get") val knowsHowToGet: Boolean? = null,
+    @kotlinx.serialization.SerialName("has_lodging") val hasLodging: Boolean? = null,
 )
 
 @kotlinx.serialization.Serializable
