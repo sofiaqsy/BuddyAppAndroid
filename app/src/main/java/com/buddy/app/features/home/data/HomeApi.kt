@@ -21,6 +21,10 @@ interface HomeApi {
     @POST("location/resolve")
     suspend fun resolveLocation(@Body body: ResolveRequest): Response<ApiLocationResolution>
 
+    /** Encuentra o auto-crea el Place geográfico para unas coords (flujo pioneer). */
+    @POST("places/resolve")
+    suspend fun resolvePlace(@Body body: ResolveRequest): ApiResolvedPlace
+
     @GET("places/{id}/context")
     suspend fun placeContext(
         @Path("id") id: String,
@@ -81,6 +85,9 @@ data class JourneyStatusBody(val status: String)
 
 @Serializable
 data class ResolveRequest(val lat: Double, val lng: Double)
+
+@Serializable
+data class ApiResolvedPlace(val id: String, val name: String, val city: String? = null)
 
 @Serializable
 data class SearchResponse(val items: List<ApiPlaceResult>)

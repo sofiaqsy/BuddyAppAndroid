@@ -140,8 +140,9 @@ fun InicioScreen(
                 isLoading = isFindingBuddy,
                 onRequest = { category ->
                     // Espejo de submitHelpFromHome (iOS):
-                    // buddy activo → seguir la conversación; pioneer → crear
-                    // trip y llevar a "Tu trip"; normal → matching.
+                    // buddy activo → seguir la conversación; pioneer con destino →
+                    // trip + solicitud y a "Tu trip"; pioneer sin destino pero con
+                    // GPS → pioneerHelpFlow; sin nada → registro de trip.
                     when {
                         state.activeBuddyName != null -> onOpenConexiones()
                         state.communityContext?.totalBuddies == 0 && state.destinationId != null -> {
@@ -150,6 +151,11 @@ fun InicioScreen(
                         }
                         state.destinationId != null ->
                             matchingViewModel.findBuddy(state.destinationId!!, category)
+                        state.userLat != null && state.userLng != null -> {
+                            matchingViewModel.findBuddyPioneer(state.userLat!!, state.userLng!!, category)
+                            onOpenTrips()
+                        }
+                        else -> onOpenTrips()   // sin ubicación: registrar trip a mano (como iOS)
                     }
                 },
             )

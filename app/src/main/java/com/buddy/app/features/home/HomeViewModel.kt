@@ -45,6 +45,8 @@ class HomeViewModel @Inject constructor(
         // Espejo de liveJourneys / activeMatch (iOS): con trip vivo el composer
         // usa el destino del trip y el CTA cambia a "Sigue hablando con X".
         val activeJourney: ApiJourney? = null,
+        val userLat: Double? = null,
+        val userLng: Double? = null,
         val activeBuddyName: String? = null,
         val activeBuddyAvatarUrl: String? = null,
     )
@@ -118,6 +120,7 @@ class HomeViewModel @Inject constructor(
             _state.update { it.copy(isLoading = false) }
             return
         }
+        _state.update { it.copy(userLat = loc.lat, userLng = loc.lng) }
         Log.d(TAG, "resolving location lat=${loc.lat} lng=${loc.lng}")
         val res = api.resolveLocation(ResolveRequest(loc.lat, loc.lng))
         val resolution = if (res.code() == 204) null else res.body()

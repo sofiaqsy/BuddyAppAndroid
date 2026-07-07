@@ -60,7 +60,7 @@ interface MatchingApi {
 
 @Serializable
 data class HelpRequestBody(
-    @SerialName("destination_id") val destinationId: String,
+    @SerialName("destination_id") val destinationId: String? = null,
     val category: String,
     val description: String? = null,
     @SerialName("journey_id") val journeyId: String? = null,

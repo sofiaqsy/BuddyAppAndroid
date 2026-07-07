@@ -15,7 +15,7 @@ class MatchingRepository @Inject constructor(
     private val api: MatchingApi,
     private val sse: SseClient,
 ) {
-    suspend fun createHelpRequest(destinationId: String, category: String, description: String? = null, journeyId: String? = null): ApiHelpRequest =
+    suspend fun createHelpRequest(destinationId: String?, category: String, description: String? = null, journeyId: String? = null): ApiHelpRequest =
         api.createHelpRequest(HelpRequestBody(destinationId, category, description, journeyId))
 
     suspend fun cancelRequest(requestId: String) = api.cancelRequest(requestId)

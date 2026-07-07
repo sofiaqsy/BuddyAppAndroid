@@ -43,5 +43,26 @@ class TripRepository @Inject constructor(
     suspend fun createTrip(destinationId: String? = null, placeId: String? = null, lat: Double? = null, lng: Double? = null): ApiJourney =
         api.createJourney(CreateJourneyBody(destinationId = destinationId, placeId = placeId, lat = lat, lng = lng))
 
+    /**
+     * Espejo de ensureActiveTripForGPS (iOS): flujo pioneer sin destino curado.
+     * Resuelve/crea el Place con las coords y reusa o crea el journey GPS-only.
+     */
+    suspend fun ensureActiveTripForGps(lat: Double, lng: Double): ApiJourney {
+        val place = api.resolvePlace(com.buddy.app.features.home.data.ResolveRequest(lat, lng))
+        val journeys = runCatching { api.myJourneys() }.getOrDefault(emptyList())
+        val existing = journeys.firstOrNull {
+            it.status in listOf("active", "planning") && it.destination == null
+        }
+        if (existing != null) {
+            if (existing.status != "active") {
+                runCatching { api.updateJourneyStatus(existing.id, JourneyStatusBody("active")) }
+            }
+            return existing
+        }
+        val created = api.createJourney(CreateJourneyBody(placeId = place.id, lat = lat, lng = lng))
+        runCatching { api.updateJourneyStatus(created.id, JourneyStatusBody("active")) }
+        return created
+    }
+
     companion object { private const val TAG = "TripRepo" }
 }
