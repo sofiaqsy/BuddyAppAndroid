@@ -3,6 +3,7 @@ package com.buddy.app.navigation
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -23,13 +24,18 @@ import com.buddy.app.features.trips.TripsScreen
 @Composable
 fun BuddyRoot() {
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.Inicio) }
+    // Mismo ViewModel (scope de Activity) que usa el tab Conexiones —
+    // el badge refleja chatStore.totalUnread como en iOS.
+    val conexionesVm: com.buddy.app.features.conexiones.ConexionesViewModel =
+        androidx.hilt.navigation.compose.hiltViewModel()
+    val conexionesState by conexionesVm.state.collectAsState()
 
     Scaffold(
         containerColor = BuddyColor.Canvas,
         bottomBar = {
             BuddyTabBar(
                 selected = selectedTab,
-                unreadChats = 0,
+                unreadChats = conexionesState.totalUnread,
                 onSelect = { selectedTab = it },
                 onReselect = { /* scroll-to-top / reload — se conecta en Fase 4 */ },
             )
@@ -43,7 +49,7 @@ fun BuddyRoot() {
                 onOpenConexiones = { selectedTab = AppTab.Conexiones },
             )
             AppTab.Trips -> TripsScreen(modifier, onOpenConexiones = { selectedTab = AppTab.Conexiones })
-            AppTab.Conexiones -> ConexionesScreen(modifier)
+            AppTab.Conexiones -> ConexionesScreen(modifier, onOpenTrips = { selectedTab = AppTab.Trips })
             AppTab.Yo -> YoScreen(modifier)
         }
     }

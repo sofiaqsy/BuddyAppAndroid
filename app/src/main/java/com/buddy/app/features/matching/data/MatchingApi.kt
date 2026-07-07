@@ -121,6 +121,8 @@ data class ApiBuddyOffer(
         val id: String,
         val category: String? = null,
         val description: String? = null,
+        @SerialName("arrival_at") val arrivalAt: String? = null,
+        val destination: com.buddy.app.core.data.model.ApiDestinationRef? = null,
         val users: ApiUserRef? = null,
     )
 }
@@ -133,6 +135,7 @@ data class ApiMessage(
     val type: String? = null,
     val content: String? = null,
     @SerialName("image_url") val imageUrl: String? = null,
+    @SerialName("read_at") val readAt: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
     val users: ApiUserRef? = null,
 )
