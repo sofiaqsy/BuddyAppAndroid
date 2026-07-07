@@ -23,6 +23,7 @@ class TripsViewModel @Inject constructor(
     private val api: HomeApi,
     private val tripRepo: TripRepository,
     private val travelerRepo: TravelerRepository,
+    private val matchingRepo: com.buddy.app.features.matching.data.MatchingRepository,
 ) : ViewModel() {
 
     data class TripsState(
@@ -31,6 +32,8 @@ class TripsViewModel @Inject constructor(
         val showRegisterSheet: Boolean = false,
         val searchResults: List<ApiPlaceResult> = emptyList(),
         val isCreating: Boolean = false,
+        val activeBuddyName: String? = null,
+        val activeBuddyAvatarUrl: String? = null,
     )
 
     private val _state = MutableStateFlow(TripsState())
@@ -45,7 +48,17 @@ class TripsViewModel @Inject constructor(
             try {
                 travelerRepo.ensureSession()
                 val journeys = tripRepo.myJourneys()
-                _state.update { it.copy(isLoading = false, journeys = journeys) }
+                // Buddy activo para la fila "¿Una duda en X?" (como iOS activeMatch)
+                val activeMatch = runCatching { matchingRepo.matches() }.getOrDefault(emptyList())
+                    .firstOrNull { it.status in listOf("pending", "accepted", "active") }
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        journeys = journeys,
+                        activeBuddyName = activeMatch?.buddy?.fullName?.split(" ")?.firstOrNull(),
+                        activeBuddyAvatarUrl = activeMatch?.buddy?.avatarUrl,
+                    )
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "load failed", e)
                 _state.update { it.copy(isLoading = false) }

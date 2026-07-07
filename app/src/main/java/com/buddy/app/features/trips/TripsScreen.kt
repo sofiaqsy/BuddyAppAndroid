@@ -35,9 +35,13 @@ import com.buddy.app.core.designsystem.components.BuddyCard
 import com.buddy.app.core.designsystem.components.BuddyEmptyState
 import com.buddy.app.core.designsystem.components.BuddyLoading
 
-/** Versión base de TripsView (iOS) — lista de journeys del traveler. */
+/** Espejo de TripsView (iOS) — TripFeedCard por journey + registro. */
 @Composable
-fun TripsScreen(modifier: Modifier = Modifier, viewModel: TripsViewModel = hiltViewModel()) {
+fun TripsScreen(
+    modifier: Modifier = Modifier,
+    onOpenConexiones: () -> Unit = {},
+    viewModel: TripsViewModel = hiltViewModel(),
+) {
     val state by viewModel.state.collectAsState()
 
     Column(
@@ -71,7 +75,15 @@ fun TripsScreen(modifier: Modifier = Modifier, viewModel: TripsViewModel = hiltV
                 Modifier.padding(horizontal = Spacing.edge),
                 verticalArrangement = Arrangement.spacedBy(Spacing.md),
             ) {
-                state.journeys.forEach { TripRow(it) }
+                state.journeys.forEach { journey ->
+                    TripFeedCard(
+                        journey = journey,
+                        buddyName = state.activeBuddyName,
+                        buddyAvatarUrl = state.activeBuddyAvatarUrl,
+                        onEdit = { /* editor de momentos (Memoir) — próxima fase */ },
+                        onBuddyTap = onOpenConexiones,
+                    )
+                }
                 Spacer(Modifier.height(Spacing.sm))
                 com.buddy.app.core.designsystem.components.BuddySecondaryButton(
                     text = "Registrar otro trip",
