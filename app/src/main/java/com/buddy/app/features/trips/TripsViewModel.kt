@@ -18,6 +18,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * Espejo del estado de TripsView (iOS): trips visibles (active/planning,
+ * activos primero), selección, cancelación optimista de viaje/lugar.
+ */
 @HiltViewModel
 class TripsViewModel @Inject constructor(
     private val api: HomeApi,
@@ -29,12 +33,22 @@ class TripsViewModel @Inject constructor(
     data class TripsState(
         val isLoading: Boolean = true,
         val journeys: List<ApiJourney> = emptyList(),
+        val selectedTripId: String? = null,
         val showRegisterSheet: Boolean = false,
         val searchResults: List<ApiPlaceResult> = emptyList(),
         val isCreating: Boolean = false,
         val activeBuddyName: String? = null,
         val activeBuddyAvatarUrl: String? = null,
-    )
+    ) {
+        /** Mismo filtro/orden que visibleTrips (iOS): active primero, luego llegada desc. */
+        val visibleTrips: List<ApiJourney>
+            get() = journeys
+                .filter { it.status in listOf("active", "planning") }
+                .sortedWith(compareBy({ if (it.status == "active") 0 else 1 }, { it.arrivalAt ?: "" }))
+
+        val selectedTrip: ApiJourney?
+            get() = visibleTrips.firstOrNull { it.id == selectedTripId } ?: visibleTrips.firstOrNull()
+    }
 
     private val _state = MutableStateFlow(TripsState())
     val state: StateFlow<TripsState> = _state.asStateFlow()
@@ -48,14 +62,17 @@ class TripsViewModel @Inject constructor(
             try {
                 travelerRepo.ensureSession()
                 val journeys = tripRepo.myJourneys()
-                // Buddy activo para la fila "¿Una duda en X?" (como iOS activeMatch)
-                val activeMatch = runCatching { matchingRepo.matches() }.getOrDefault(emptyList())
-                    .firstOrNull { it.status in listOf("pending", "accepted", "active") }
-                _state.update {
-                    it.copy(
+                // Match activo para la fila del buddy (como activeMatch en iOS)
+                val hasActive = journeys.any { it.status == "active" }
+                val activeMatch = if (hasActive) {
+                    runCatching { matchingRepo.matches() }.getOrDefault(emptyList())
+                        .firstOrNull { it.status in listOf("pending", "accepted", "active") }
+                } else null
+                _state.update { s ->
+                    s.copy(
                         isLoading = false,
                         journeys = journeys,
-                        activeBuddyName = activeMatch?.buddy?.fullName?.split(" ")?.firstOrNull(),
+                        activeBuddyName = activeMatch?.buddy?.fullName?.split(" ")?.firstOrNull()?.replaceFirstChar { it.uppercase() },
                         activeBuddyAvatarUrl = activeMatch?.buddy?.avatarUrl,
                     )
                 }
@@ -63,6 +80,40 @@ class TripsViewModel @Inject constructor(
                 Log.e(TAG, "load failed", e)
                 _state.update { it.copy(isLoading = false) }
             }
+        }
+    }
+
+    fun selectTrip(id: String) = _state.update { it.copy(selectedTripId = id) }
+
+    /** Cancela el VIAJE completo — optimista, igual que cancelActiveTrip (iOS). */
+    fun cancelSelectedTrip() {
+        val trip = _state.value.selectedTrip ?: return
+        val tripId = trip.tripId
+        _state.update { s ->
+            s.copy(
+                journeys = if (tripId != null) s.journeys.filter { it.tripId != tripId }
+                           else s.journeys.filter { it.id != trip.id },
+                selectedTripId = null,
+            )
+        }
+        viewModelScope.launch {
+            runCatching {
+                if (tripId != null) api.cancelTrip(tripId) else api.cancelJourney(trip.id)
+            }.onFailure { Log.e(TAG, "cancelTrip failed", it) }
+        }
+    }
+
+    /** Elimina UN lugar del viaje — optimista, igual que deleteJourney (iOS). */
+    fun deleteJourney(journey: ApiJourney) {
+        _state.update { s ->
+            s.copy(
+                journeys = s.journeys.filter { it.id != journey.id },
+                selectedTripId = if (s.selectedTripId == journey.id) null else s.selectedTripId,
+            )
+        }
+        viewModelScope.launch {
+            runCatching { api.cancelJourney(journey.id) }
+                .onFailure { Log.e(TAG, "deleteJourney failed", it) }
         }
     }
 
@@ -84,7 +135,6 @@ class TripsViewModel @Inject constructor(
         }
     }
 
-    /** Crea el journey para el lugar elegido y refresca la lista. */
     fun registerTrip(place: ApiPlaceResult) {
         if (_state.value.isCreating) return
         viewModelScope.launch {

@@ -53,6 +53,14 @@ interface HomeApi {
         @retrofit2.http.Path("id") journeyId: String,
         @Body body: JourneyStatusBody,
     )
+
+    /** Elimina UN lugar (journey) del viaje. */
+    @retrofit2.http.DELETE("journeys/{id}")
+    suspend fun cancelJourney(@retrofit2.http.Path("id") journeyId: String)
+
+    /** Cancela el VIAJE completo (todos sus lugares + apoyos en curso). */
+    @retrofit2.http.DELETE("trips/{id}")
+    suspend fun cancelTrip(@retrofit2.http.Path("id") tripId: String)
 }
 
 @kotlinx.serialization.Serializable

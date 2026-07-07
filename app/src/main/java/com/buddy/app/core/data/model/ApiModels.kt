@@ -91,6 +91,7 @@ data class ApiJourney(
     @SerialName("place_count") val placeCount: Int? = null,
     @SerialName("sticker_count") val stickerCount: Int? = null,
     @SerialName("page_thumbs") val pageThumbs: List<String>? = null,
+    @SerialName("trip_id") val tripId: String? = null,
 )
 
 // Página del feed "Historias de viajeros"
