@@ -37,7 +37,11 @@ fun BuddyRoot() {
     ) { padding ->
         val modifier = Modifier.padding(padding)
         when (selectedTab) {
-            AppTab.Inicio -> InicioScreen(modifier)
+            AppTab.Inicio -> InicioScreen(
+                modifier,
+                onOpenTrips = { selectedTab = AppTab.Trips },
+                onOpenConexiones = { selectedTab = AppTab.Conexiones },
+            )
             AppTab.Trips -> TripsScreen(modifier, onOpenConexiones = { selectedTab = AppTab.Conexiones })
             AppTab.Conexiones -> ConexionesScreen(modifier)
             AppTab.Yo -> YoScreen(modifier)

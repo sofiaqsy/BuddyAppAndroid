@@ -11,28 +11,35 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bed
 import androidx.compose.material.icons.filled.Coffee
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,13 +47,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -58,20 +68,28 @@ import com.buddy.app.core.designsystem.BuddyType
 import com.buddy.app.core.designsystem.Radius
 import com.buddy.app.core.designsystem.Spacing
 import com.buddy.app.core.designsystem.components.BuddyAvatar
-import com.buddy.app.core.designsystem.components.BuddyCard
 import com.buddy.app.core.designsystem.components.BuddyLoading
 import com.buddy.app.core.designsystem.components.BuddyPrimaryButton
+import com.buddy.app.core.designsystem.components.BuddySheet
+import com.buddy.app.core.designsystem.components.BuddyTextButton
+import com.buddy.app.features.matching.MatchingViewModel
+import java.time.LocalDate
+import java.time.OffsetDateTime
+import java.time.temporal.ChronoUnit
 
 /**
- * Espejo de InicioView (iOS): composer "Consulta con un buddy" (6 categorías,
- * availability text del contexto de comunidad), RegisterCTACard y la sección
- * "HISTORIAS DE VIAJEROS". El flujo de matching se conecta en Fase 5.
+ * Espejo 1:1 de InicioView (iOS): locationContext ("Estás en X" / activar
+ * ubicación), CategoryPickerView completo (hero, grid 2×3, CTA pill oscuro
+ * con availability text integrado), RegisterCTACard y HISTORIAS DE VIAJEROS
+ * (carrusel con scrim + nombre + dots + footer autor/duración).
  */
 @Composable
 fun InicioScreen(
     modifier: Modifier = Modifier,
+    onOpenTrips: () -> Unit = {},
+    onOpenConexiones: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
-    matchingViewModel: com.buddy.app.features.matching.MatchingViewModel = hiltViewModel(),
+    matchingViewModel: MatchingViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
     val searchState by matchingViewModel.state.collectAsState()
@@ -80,7 +98,7 @@ fun InicioScreen(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { grants -> viewModel.onPermissionResult(grants.values.any { it }) }
 
-    androidx.compose.runtime.LaunchedEffect(state.needsLocationPermission) {
+    LaunchedEffect(state.needsLocationPermission) {
         if (state.needsLocationPermission) {
             permissionLauncher.launch(arrayOf(
                 Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -94,28 +112,49 @@ fun InicioScreen(
         return
     }
 
+    val isFindingBuddy = searchState is MatchingViewModel.SearchState.Searching
+
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(BuddyColor.Canvas)
-            .verticalScroll(rememberScrollState()),
+        modifier.fillMaxSize().background(BuddyColor.Canvas).verticalScroll(rememberScrollState()),
     ) {
         Spacer(Modifier.height(Spacing.md))
 
-        if (state.loadFailed) {
-            RetryRow(onRetry = viewModel::load)
-        }
+        if (state.loadFailed) RetryRow(onRetry = viewModel::load)
 
-        Column(Modifier.padding(horizontal = Spacing.edge)) {
+        // ── Composer (con o sin trip — mismo layout, distinto destino) ─────
+        Column(Modifier.padding(horizontal = Spacing.edge).alpha(if (isFindingBuddy) 0.5f else 1f)) {
+            LocationContext(
+                city = state.destinationName,
+                onRequestPermission = {
+                    permissionLauncher.launch(arrayOf(
+                        Manifest.permission.ACCESS_COARSE_LOCATION,
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                    ))
+                },
+            )
             CategoryPicker(
                 destinationName = state.destinationName,
                 communityContext = state.communityContext,
+                activeBuddyName = state.activeBuddyName,
+                activeBuddyAvatarUrl = state.activeBuddyAvatarUrl,
+                isLoading = isFindingBuddy,
                 onRequest = { category ->
-                    state.destinationId?.let { matchingViewModel.findBuddy(it, category) }
+                    // Espejo de submitHelpFromHome (iOS):
+                    // buddy activo → seguir la conversación; pioneer → crear
+                    // trip y llevar a "Tu trip"; normal → matching.
+                    when {
+                        state.activeBuddyName != null -> onOpenConexiones()
+                        state.communityContext?.totalBuddies == 0 && state.destinationId != null -> {
+                            matchingViewModel.findBuddy(state.destinationId!!, category)
+                            onOpenTrips()
+                        }
+                        state.destinationId != null ->
+                            matchingViewModel.findBuddy(state.destinationId!!, category)
+                    }
                 },
             )
-            Spacer(Modifier.height(Spacing.md))
-            RegisterCtaCard(onTap = { /* registro de trip — Fase 4b */ })
+            Spacer(Modifier.height(Spacing.xs))
+            RegisterCtaCard(onTap = onOpenTrips)
         }
 
         Spacer(Modifier.height(Spacing.xl))
@@ -128,63 +167,40 @@ fun InicioScreen(
         Spacer(Modifier.height(100.dp))
     }
 
-    MatchingSheet(searchState, matchingViewModel)
+    MatchingSheet(searchState, matchingViewModel, onOpenConexiones)
 }
 
-/** Estado de la búsqueda de buddy — bottom sheet (adaptación Android del flujo modal de iOS). */
+// ── Location context — "Estás en X" / activar ubicación ───────────────────
 @Composable
-private fun MatchingSheet(
-    searchState: com.buddy.app.features.matching.MatchingViewModel.SearchState,
-    viewModel: com.buddy.app.features.matching.MatchingViewModel,
-) {
-    if (searchState is com.buddy.app.features.matching.MatchingViewModel.SearchState.Idle) return
-    com.buddy.app.core.designsystem.components.BuddySheet(
-        onDismiss = {
-            if (searchState is com.buddy.app.features.matching.MatchingViewModel.SearchState.Searching)
-                viewModel.cancelSearch() else viewModel.dismiss()
-        },
-    ) {
-        Column(
-            Modifier.fillMaxWidth().padding(horizontal = Spacing.edge, vertical = Spacing.lg),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+private fun LocationContext(city: String?, onRequestPermission: () -> Unit) {
+    if (city != null) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            when (searchState) {
-                is com.buddy.app.features.matching.MatchingViewModel.SearchState.Searching -> {
-                    BuddyLoading(Modifier.height(60.dp))
-                    Text("Buscando un buddy para ti…", style = BuddyType.Title3, color = BuddyColor.Ink)
-                    Text(
-                        "Te conectaremos con la primera persona disponible.",
-                        style = BuddyType.Subhead, color = BuddyColor.InkMuted,
-                    )
-                    com.buddy.app.core.designsystem.components.BuddyTextButton(
-                        "Cancelar búsqueda",
-                        onClick = { viewModel.cancelSearch() },
-                    )
-                }
-                is com.buddy.app.features.matching.MatchingViewModel.SearchState.Matched -> {
-                    BuddyAvatar(imageUrl = searchState.buddy?.avatarUrl, name = searchState.buddy?.fullName, size = 64.dp)
-                    Text(
-                        "¡${searchState.buddy?.fullName ?: "Tu buddy"} está listo para ayudarte!",
-                        style = BuddyType.Title3, color = BuddyColor.Ink,
-                    )
-                    BuddyPrimaryButton("Ir a la conversación", onClick = { viewModel.dismiss() /* tab Conexiones */ })
-                }
-                is com.buddy.app.features.matching.MatchingViewModel.SearchState.Failed -> {
-                    Text(searchState.message, style = BuddyType.Subhead, color = BuddyColor.InkMuted)
-                    com.buddy.app.core.designsystem.components.BuddyTextButton(
-                        "Entendido",
-                        onClick = { viewModel.dismiss() },
-                    )
-                }
-                else -> {}
-            }
-            Spacer(Modifier.height(Spacing.lg))
+            Icon(Icons.Filled.LocationOn, contentDescription = null, Modifier.size(11.dp), tint = BuddyColor.Brand)
+            Text("Estás en $city", style = BuddyType.Caption1.copy(fontWeight = FontWeight.SemiBold), color = BuddyColor.Brand)
+        }
+    } else {
+        Row(
+            Modifier.clickable(onClick = onRequestPermission),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(Icons.Filled.MyLocation, contentDescription = null, Modifier.size(13.dp), tint = BuddyColor.Brand)
+            Text(
+                "Activa tu ubicación para conectarte con ayuda cerca",
+                style = BuddyType.Caption1, color = BuddyColor.Brand,
+            )
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null,
+                Modifier.size(10.dp), tint = BuddyColor.Brand.copy(alpha = 0.5f),
+            )
         }
     }
 }
 
-// ── Composer "Consulta con un buddy" ──────────────────────────────────────
+// ── CategoryPicker — espejo completo de CategoryPickerView (iOS) ──────────
 
 private data class BuddyCategory(val icon: ImageVector, val label: String, val subtitle: String, val apiKey: String)
 
@@ -197,8 +213,9 @@ private val categories = listOf(
     BuddyCategory(Icons.Filled.Shield, "Seguridad", "Emergencias y consejos útiles", "emergency"),
 )
 
-/** Texto bajo el CTA — mismas frases exactas que CategoryPickerView (iOS). */
-private fun availabilityText(ctx: ApiPlaceContext?): String {
+/** Texto bajo el título del CTA — mismas frases exactas que iOS. */
+private fun availabilityText(ctx: ApiPlaceContext?, activeBuddyName: String?): String {
+    if (activeBuddyName != null) return "Tu buddy sigue disponible para ayudarte."
     if (ctx == null) return "Te conectamos con el primer buddy disponible"
     if (ctx.buddies > 0) return if (ctx.buddies == 1)
         "1 buddy disponible para ti ahora"
@@ -216,14 +233,22 @@ private fun availabilityText(ctx: ApiPlaceContext?): String {
 private fun CategoryPicker(
     destinationName: String?,
     communityContext: ApiPlaceContext?,
+    activeBuddyName: String?,
+    activeBuddyAvatarUrl: String?,
+    isLoading: Boolean,
     onRequest: (String) -> Unit,
 ) {
     var selected by remember { mutableStateOf<BuddyCategory?>(null) }
-    val pioneer = communityContext?.totalBuddies == 0
-    val canRequest = selected != null || (!pioneer && communityContext != null && communityContext.totalBuddies == 0)
+    val noBuddies = activeBuddyName == null &&
+        (communityContext?.let { it.buddies <= 0 && it.totalBuddies <= 0 } ?: true)
+    // canRequest — misma regla que iOS: categoría elegida, buddy activo, o
+    // pioneer (totalBuddies == 0) que no exige categoría.
+    val canRequest = selected != null || activeBuddyName != null ||
+        (communityContext != null && communityContext.totalBuddies == 0)
 
     Column {
-        // Hero heading — "Consulta con un buddy" (buddy en brand)
+        Spacer(Modifier.height(Spacing.md))
+        // Hero heading
         Text(
             buildAnnotatedString {
                 withStyle(SpanStyle(color = BuddyColor.Ink)) { append("Consulta con un ") }
@@ -241,13 +266,13 @@ private fun CategoryPicker(
                 }
                 withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append(".") }
             },
-            style = BuddyType.Subhead,
+            style = BuddyType.Callout,
         )
-        Spacer(Modifier.height(Spacing.md))
+        Spacer(Modifier.height(Spacing.lg))
 
-        // Grid 2×3 de categorías
+        // Grid 2×3 — icon square + title + subtitle (estilo exacto iOS)
         categories.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 row.forEach { cat ->
                     CategoryCell(
                         category = cat,
@@ -257,22 +282,62 @@ private fun CategoryPicker(
                     )
                 }
             }
-            Spacer(Modifier.height(Spacing.sm))
+            Spacer(Modifier.height(12.dp))
         }
 
-        Spacer(Modifier.height(Spacing.sm))
-        BuddyPrimaryButton(
-            text = "Buscar un buddy",
-            onClick = { selected?.let { onRequest(it.apiKey) } },
-            enabled = canRequest || selected != null,
-        )
-        Spacer(Modifier.height(Spacing.sm))
-        Text(
-            availabilityText(communityContext),
-            style = BuddyType.Caption1,
-            color = if ((communityContext?.buddies ?: 0) > 0) BuddyColor.Accent else BuddyColor.InkMuted,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        Spacer(Modifier.height(Spacing.md))
+
+        // CTA pill oscuro — burbuja/avatar + título dinámico + flecha/spinner
+        val ctaTitle = when {
+            activeBuddyName != null -> "Sigue hablando con $activeBuddyName"
+            noBuddies -> "Sé el primero en explorar"
+            else -> "Hablar con un buddy"
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(Radius.lg))
+                .background(if (canRequest) BuddyColor.Brand else BuddyColor.BrandDisabled)
+                .clickable(enabled = canRequest && !isLoading) {
+                    val cat = selected?.apiKey ?: "general"
+                    selected = null
+                    onRequest(cat)
+                }
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(
+                Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (activeBuddyAvatarUrl != null) {
+                    AsyncImage(
+                        model = activeBuddyAvatarUrl, contentDescription = null,
+                        contentScale = ContentScale.Crop, modifier = Modifier.size(44.dp),
+                    )
+                } else {
+                    Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, Modifier.size(18.dp), tint = Color.White)
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text(ctaTitle, style = BuddyType.FootnoteBold, color = Color.White)
+                Text(
+                    availabilityText(communityContext, activeBuddyName),
+                    style = BuddyType.Caption1, color = Color.White.copy(alpha = 0.75f),
+                )
+            }
+            Box(
+                Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, Modifier.size(14.dp), tint = Color.White)
+                }
+            }
+        }
     }
 }
 
@@ -285,30 +350,43 @@ private fun CategoryCell(
 ) {
     val shape = RoundedCornerShape(Radius.md)
     Row(
-        modifier = modifier
+        modifier
             .clip(shape)
-            .background(if (selected) BuddyColor.SurfaceRaised else BuddyColor.Surface)
-            .border(1.dp, if (selected) BuddyColor.Brand else BuddyColor.Border, shape)
+            .background(BuddyColor.Surface)
+            .border(
+                if (selected) 1.5.dp else 1.dp,
+                if (selected) BuddyColor.Brand.copy(alpha = 0.4f) else BuddyColor.Border,
+                shape,
+            )
             .clickable(onClick = onTap)
-            .padding(horizontal = Spacing.sm + 4.dp, vertical = Spacing.sm + 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.sm + 2.dp),
+            .padding(12.dp),
+        verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(
-            Modifier.size(34.dp).background(BuddyColor.GroupedBg, CircleShape),
+            Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (selected) BuddyColor.Brand.copy(alpha = 0.12f) else BuddyColor.GroupedBg),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(category.icon, contentDescription = null, Modifier.size(16.dp), tint = BuddyColor.Brand)
+            Icon(
+                category.icon, contentDescription = null, Modifier.size(16.dp),
+                tint = if (selected) BuddyColor.Brand else BuddyColor.Accent,
+            )
         }
-        Column {
-            Text(category.label, style = BuddyType.FootnoteBold, color = BuddyColor.Ink, maxLines = 1)
-            Text(category.subtitle, style = BuddyType.Caption1, color = BuddyColor.InkMuted, maxLines = 1, fontSize = 10.sp)
+        Column(Modifier.weight(1f)) {
+            Text(
+                category.label, style = BuddyType.FootnoteBold,
+                color = if (selected) BuddyColor.Brand else BuddyColor.Ink, maxLines = 1,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(category.subtitle, style = BuddyType.Caption1, color = BuddyColor.InkMuted, maxLines = 2)
         }
     }
 }
 
-// ── Register CTA ──────────────────────────────────────────────────────────
-
+// ── Register CTA — "¿Vas a viajar?" ────────────────────────────────────────
 @Composable
 private fun RegisterCtaCard(onTap: () -> Unit) {
     val shape = RoundedCornerShape(Radius.lg)
@@ -333,20 +411,17 @@ private fun RegisterCtaCard(onTap: () -> Unit) {
             Text("¿Vas a viajar?", style = BuddyType.FootnoteBold, color = BuddyColor.Ink)
             Text(
                 "Regístralo y prepara tu llegada para aprovechar al máximo.",
-                style = BuddyType.Caption1,
-                color = BuddyColor.InkMuted,
+                style = BuddyType.Caption1, color = BuddyColor.InkMuted,
             )
         }
         Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight,
-            contentDescription = null,
+            Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null,
             tint = BuddyColor.InkMuted.copy(alpha = 0.5f),
         )
     }
 }
 
-// ── Historias de viajeros ─────────────────────────────────────────────────
-
+// ── Historias de viajeros — carrusel + scrim + dots + footer ──────────────
 @Composable
 private fun CommunitySection(
     stories: List<ApiJourney>,
@@ -384,53 +459,147 @@ private fun CommunitySection(
             }
             isLoading && stories.isEmpty() -> BuddyLoading(Modifier.height(200.dp))
             else -> stories.forEach { story ->
-                StoryCard(story, Modifier.padding(horizontal = Spacing.edge))
+                PublishedTripCard(story, Modifier.padding(horizontal = Spacing.edge))
             }
         }
     }
 }
 
+/** Espejo de PublishedTripCard (iOS): carrusel con scrim, nombre, dots, footer. */
 @Composable
-private fun StoryCard(story: ApiJourney, modifier: Modifier = Modifier) {
-    val imageUrl = story.pageThumbs?.firstOrNull() ?: story.coverUrl
-    BuddyCard(modifier = modifier.fillMaxWidth(), contentPadding = 0.dp) {
-        if (imageUrl != null) {
-            AsyncImage(
-                model = imageUrl,
-                contentDescription = story.title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxWidth().height(320.dp),
-            )
+private fun PublishedTripCard(story: ApiJourney, modifier: Modifier = Modifier) {
+    val thumbs = story.pageThumbs.orEmpty().ifEmpty { listOfNotNull(story.coverUrl) }
+    val destName = story.destination?.name ?: story.title ?: ""
+    val authorName = story.users?.fullName ?: "Viajero"
+
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Radius.lg))
+            .background(BuddyColor.Surface),
+    ) {
+        if (thumbs.isNotEmpty()) {
+            val pagerState = rememberPagerState(pageCount = { thumbs.size })
+            Box {
+                HorizontalPager(state = pagerState) { page ->
+                    AsyncImage(
+                        model = thumbs[page],
+                        contentDescription = destName,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxWidth().aspectRatio(0.8f),
+                    )
+                }
+                // Scrim superior — legibilidad en fotos claras
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(64.dp)
+                        .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.38f), Color.Transparent))),
+                )
+                Text(
+                    destName,
+                    style = BuddyType.FootnoteBold,
+                    color = Color.White,
+                    modifier = Modifier.padding(start = 14.dp, top = 12.dp),
+                )
+                if (thumbs.size > 1) {
+                    Row(
+                        Modifier.align(Alignment.BottomCenter).padding(bottom = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        repeat(thumbs.size) { i ->
+                            Box(
+                                Modifier.size(6.dp).background(
+                                    if (i == pagerState.currentPage) Color.White else Color.White.copy(alpha = 0.5f),
+                                    CircleShape,
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
         }
+        // Footer minimalista: viajero + duración
         Row(
             Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            BuddyAvatar(imageUrl = story.users?.avatarUrl, name = story.users?.fullName, size = 24.dp)
-            Text(
-                story.users?.fullName ?: "Viajero",
-                style = BuddyType.Caption1,
-                color = BuddyColor.Ink,
-                modifier = Modifier.weight(1f),
-            )
-            if (story.destination != null) {
-                Text(story.destination.name, style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+            BuddyAvatar(imageUrl = story.users?.avatarUrl, name = authorName, size = 24.dp)
+            Text(authorName, style = BuddyType.Footnote, color = BuddyColor.Ink, modifier = Modifier.weight(1f))
+            durationLine(story)?.let {
+                Text(it, style = BuddyType.Subhead, color = BuddyColor.InkMuted)
             }
         }
     }
+}
+
+private fun durationLine(j: ApiJourney): String? {
+    val a = parseDate(j.arrivalAt) ?: return null
+    val d = parseDate(j.departureAt) ?: return null
+    if (d < a) return null
+    val days = maxOf(1, ChronoUnit.DAYS.between(a, d).toInt())
+    return if (days == 1) "1 día" else "$days días"
+}
+
+private fun parseDate(iso: String?): LocalDate? = iso?.let {
+    runCatching { OffsetDateTime.parse(it).toLocalDate() }.getOrNull()
+        ?: runCatching { LocalDate.parse(it.take(10)) }.getOrNull()
 }
 
 @Composable
 private fun RetryRow(onRetry: () -> Unit) {
     Row(
-        Modifier
-            .padding(horizontal = Spacing.edge)
-            .clickable(onClick = onRetry),
+        Modifier.padding(horizontal = Spacing.edge).clickable(onClick = onRetry),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Icon(Icons.Filled.Refresh, contentDescription = null, Modifier.size(14.dp), tint = BuddyColor.InkMuted)
         Text("No pudimos cargar. Reintentar", style = BuddyType.Footnote, color = BuddyColor.InkMuted)
+    }
+}
+
+// ── Sheet de búsqueda (searching / matched / failed) ───────────────────────
+@Composable
+private fun MatchingSheet(
+    searchState: MatchingViewModel.SearchState,
+    viewModel: MatchingViewModel,
+    onOpenConexiones: () -> Unit,
+) {
+    if (searchState is MatchingViewModel.SearchState.Idle) return
+    BuddySheet(
+        onDismiss = {
+            if (searchState is MatchingViewModel.SearchState.Searching) viewModel.cancelSearch()
+            else viewModel.dismiss()
+        },
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = Spacing.edge, vertical = Spacing.lg),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(Spacing.md),
+        ) {
+            when (searchState) {
+                is MatchingViewModel.SearchState.Searching -> {
+                    BuddyLoading(Modifier.height(60.dp))
+                    Text("Buscando un buddy para ti…", style = BuddyType.Title3, color = BuddyColor.Ink)
+                    Text("Te conectaremos con la primera persona disponible.", style = BuddyType.Subhead, color = BuddyColor.InkMuted)
+                    BuddyTextButton("Cancelar búsqueda", onClick = { viewModel.cancelSearch() })
+                }
+                is MatchingViewModel.SearchState.Matched -> {
+                    BuddyAvatar(imageUrl = searchState.buddy?.avatarUrl, name = searchState.buddy?.fullName, size = 64.dp)
+                    Text(
+                        "¡${searchState.buddy?.fullName ?: "Tu buddy"} está listo para ayudarte!",
+                        style = BuddyType.Title3, color = BuddyColor.Ink,
+                    )
+                    BuddyPrimaryButton("Ir a la conversación", onClick = { viewModel.dismiss(); onOpenConexiones() })
+                }
+                is MatchingViewModel.SearchState.Failed -> {
+                    Text(searchState.message, style = BuddyType.Subhead, color = BuddyColor.InkMuted)
+                    BuddyTextButton("Entendido", onClick = { viewModel.dismiss() })
+                }
+                else -> {}
+            }
+            Spacer(Modifier.height(Spacing.lg))
+        }
     }
 }

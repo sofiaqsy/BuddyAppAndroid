@@ -27,6 +27,7 @@ import javax.inject.Inject
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val api: HomeApi,
+    private val matchingApi: com.buddy.app.features.matching.data.MatchingApi,
     private val travelerRepo: TravelerRepository,
     private val locationProvider: LocationProvider,
 ) : ViewModel() {
@@ -41,6 +42,11 @@ class HomeViewModel @Inject constructor(
         val isLoadingFeed: Boolean = true,
         val feedFailed: Boolean = false,
         val needsLocationPermission: Boolean = false,
+        // Espejo de liveJourneys / activeMatch (iOS): con trip vivo el composer
+        // usa el destino del trip y el CTA cambia a "Sigue hablando con X".
+        val activeJourney: ApiJourney? = null,
+        val activeBuddyName: String? = null,
+        val activeBuddyAvatarUrl: String? = null,
     )
 
     private val _state = MutableStateFlow(HomeState())
@@ -53,6 +59,7 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 travelerRepo.ensureSession()
+                loadTripAndMatch()
                 refreshCommunityContext()
                 loadFeed()
             } catch (e: Exception) {
@@ -67,7 +74,41 @@ class HomeViewModel @Inject constructor(
         else _state.update { it.copy(isLoading = false, needsLocationPermission = true) }
     }
 
+    /** Espejo de loadData + activeMatch (iOS). */
+    private suspend fun loadTripAndMatch() {
+        val journeys = runCatching { api.myJourneys() }.getOrDefault(emptyList())
+        val active = journeys.firstOrNull { it.status == "active" }
+            ?: journeys.firstOrNull { it.status == "planning" }
+        val match = if (active != null) {
+            runCatching { matchingApi.matches() }.getOrDefault(emptyList())
+                .firstOrNull { it.status in listOf("accepted", "active", "pending") }
+        } else null
+        _state.update {
+            it.copy(
+                activeJourney = active,
+                activeBuddyName = match?.buddy?.fullName?.split(" ")?.firstOrNull()?.replaceFirstChar { c -> c.uppercase() },
+                activeBuddyAvatarUrl = match?.buddy?.avatarUrl,
+            )
+        }
+    }
+
     private suspend fun refreshCommunityContext() {
+        // Con trip vivo: contexto del destino del trip (como iOS)
+        val journey = _state.value.activeJourney
+        if (journey != null) {
+            val destId = journey.destination?.id ?: journey.destinationId
+            val ctx = destId?.let { runCatching { api.placeContext(it, "destination") }.getOrNull() }
+                ?: ApiPlaceContext(0, 0, 0, "pioneer")
+            _state.update {
+                it.copy(
+                    isLoading = false,
+                    destinationId = destId,
+                    destinationName = journey.destination?.name,
+                    communityContext = ctx,
+                )
+            }
+            return
+        }
         if (!locationProvider.hasPermission()) {
             _state.update { it.copy(isLoading = false, needsLocationPermission = true) }
             return
