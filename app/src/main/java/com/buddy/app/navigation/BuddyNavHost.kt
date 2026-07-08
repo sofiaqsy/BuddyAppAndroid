@@ -50,7 +50,7 @@ fun BuddyRoot() {
             )
             AppTab.Trips -> TripsScreen(modifier, onOpenConexiones = { selectedTab = AppTab.Conexiones })
             AppTab.Conexiones -> ConexionesScreen(modifier, onOpenTrips = { selectedTab = AppTab.Trips })
-            AppTab.Yo -> YoScreen(modifier)
+            AppTab.Yo -> YoScreen(modifier, onOpenTrips = { selectedTab = AppTab.Trips })
         }
     }
 }

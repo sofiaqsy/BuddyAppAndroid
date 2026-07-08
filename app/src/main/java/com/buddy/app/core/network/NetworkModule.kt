@@ -61,4 +61,9 @@ object NetworkModule {
     @Singleton
     fun provideMatchingApi(retrofit: Retrofit): com.buddy.app.features.matching.data.MatchingApi =
         retrofit.create(com.buddy.app.features.matching.data.MatchingApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideProfileApi(retrofit: Retrofit): com.buddy.app.features.profile.data.ProfileApi =
+        retrofit.create(com.buddy.app.features.profile.data.ProfileApi::class.java)
 }
