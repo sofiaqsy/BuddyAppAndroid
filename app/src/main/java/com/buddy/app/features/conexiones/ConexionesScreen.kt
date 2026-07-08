@@ -20,7 +20,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.HowToReg
 import androidx.compose.material.icons.filled.People
+import androidx.compose.material.icons.filled.Route
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -111,7 +115,18 @@ fun ConexionesScreen(
             )
         }
 
+        // ── Estado anónimo: invitación a crear perfil, no un tab vacío ─────
+        val sessionVm: com.buddy.app.features.authentication.SessionViewModel = hiltViewModel()
+        val session by sessionVm.session.collectAsState()
+        val isSigningIn by sessionVm.isSigningIn.collectAsState()
+        val signInError by sessionVm.error.collectAsState()
+
         when {
+            session?.isVerified != true -> AnonymousConnectionState(
+                isLoading = isSigningIn,
+                error = signInError,
+                onGoogle = { ctx -> sessionVm.signInWithGoogle(ctx) },
+            )
             // Spinner SOLO antes de la primera carga (después es silencioso)
             !state.hasLoadedOnce && state.connections.isEmpty() ->
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -119,6 +134,125 @@ fun ConexionesScreen(
                 }
             state.isEmpty -> EmptyConnectionsState(onCreateTrip = onOpenTrips)
             else -> ConnectionList(state, viewModel, onOpen = { openMatchId = it })
+        }
+    }
+}
+
+// ── Estado anónimo — espejo de anonymousConnectionState (iOS) ──────────────
+@Composable
+private fun AnonymousConnectionState(
+    isLoading: Boolean,
+    error: String?,
+    onGoogle: (android.content.Context) -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Column(Modifier.verticalScroll(rememberScrollState()).padding(top = Spacing.lg)) {
+        Column(
+            Modifier
+                .padding(horizontal = Spacing.edge)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(Radius.lg))
+                .background(BuddyColor.Surface)
+                .border(1.dp, BuddyColor.Border, RoundedCornerShape(Radius.lg))
+                .padding(Spacing.lg),
+        ) {
+            // Header — icono de camino + mensaje
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Box(
+                    Modifier.size(44.dp).background(BuddyColor.GroupedBg, CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.Route, contentDescription = null,
+                        Modifier.size(18.dp), tint = BuddyColor.Brand,
+                    )
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text("Las personas son parte del viaje", style = BuddyType.FootnoteBold, color = BuddyColor.Ink)
+                    Text(
+                        "Crea tu perfil para que Buddy recuerde a quienes estuvieron contigo en el camino.",
+                        style = BuddyType.Caption1, color = BuddyColor.InkMuted,
+                    )
+                }
+            }
+            Spacer(Modifier.height(Spacing.lg))
+            HorizontalDivider(color = BuddyColor.Border)
+            Spacer(Modifier.height(Spacing.lg))
+
+            // Beneficios — misma copy que iOS
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                AnonymousBenefit(Icons.AutoMirrored.Filled.Chat, "Tus conversaciones",
+                    "Consulta el historial de lo que hablaste con tus buddies.")
+                AnonymousBenefit(Icons.Filled.HowToReg, "Tus buddies",
+                    "Las personas que te ayudaron, siempre a un mensaje de distancia.")
+                AnonymousBenefit(Icons.Filled.FavoriteBorder, "Tu impacto",
+                    "Recuerda también a quienes ayudaste tú.")
+            }
+            Spacer(Modifier.height(Spacing.md))
+            HorizontalDivider(color = BuddyColor.Border)
+            Spacer(Modifier.height(Spacing.md))
+
+            Text(
+                "Continúa con",
+                style = BuddyType.Caption1, color = BuddyColor.InkMuted,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(Spacing.sm))
+
+            // Google — cápsula canvas con borde (Credential Manager).
+            // Apple llega con la continuación de cuenta vía web OAuth.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(50.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(BuddyColor.Canvas)
+                    .border(1.dp, BuddyColor.Border, RoundedCornerShape(50))
+                    .clickable(enabled = !isLoading) { onGoogle(context) },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (isLoading) {
+                    CircularProgressIndicator(Modifier.size(18.dp), color = BuddyColor.Ink, strokeWidth = 2.dp)
+                } else {
+                    Text("Continuar con Google", style = BuddyType.FootnoteBold, color = BuddyColor.Ink)
+                }
+            }
+
+            if (error != null) {
+                Spacer(Modifier.height(Spacing.xs))
+                Text(
+                    error, style = BuddyType.Caption1, color = BuddyColor.ErrorRed,
+                    textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            Spacer(Modifier.height(Spacing.sm))
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append("Al continuar confirmas que tienes ") }
+                    withStyle(SpanStyle(color = BuddyColor.InkMuted, fontWeight = FontWeight.Bold)) { append("18+ años") }
+                    withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append(" y aceptas nuestros ") }
+                    withStyle(SpanStyle(color = BuddyColor.InkMuted, fontWeight = FontWeight.Bold)) { append("términos, privacidad") }
+                    withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append(" y ") }
+                    withStyle(SpanStyle(color = BuddyColor.InkMuted, fontWeight = FontWeight.Bold)) { append("código de conducta") }
+                },
+                style = BuddyType.Caption1,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Spacer(Modifier.height(100.dp))
+    }
+}
+
+@Composable
+private fun AnonymousBenefit(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, subtitle: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Icon(icon, contentDescription = null, Modifier.size(18.dp), tint = BuddyColor.Brand)
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = BuddyType.FootnoteBold, color = BuddyColor.Ink)
+            Text(subtitle, style = BuddyType.Caption1, color = BuddyColor.InkMuted)
         }
     }
 }
