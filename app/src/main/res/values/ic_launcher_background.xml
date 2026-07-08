@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mismo fondo que LaunchBackground (iOS): marrón Buddy -->
+    <color name="ic_launcher_background">#7B3B24</color>
+</resources>

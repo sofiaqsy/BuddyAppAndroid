@@ -12,7 +12,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.buddy.app"
+        applicationId = "com.vrcoffe.buddyapp"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Espejo del launch screen de iOS: LaunchBackground #7B3B24 + SplashLogo centrado -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/splash_background_color" />
+    <item android:gravity="center">
+        <bitmap android:src="@drawable/splash_logo" android:gravity="center" />
+    </item>
+</layer-list>
