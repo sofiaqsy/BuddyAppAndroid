@@ -70,7 +70,7 @@ class RegisterTripViewModel @Inject constructor(
         _state.update { it.copy(popularLoadFailed = false) }
         viewModelScope.launch {
             runCatching { api.destinations(limit = 5) }
-                .onSuccess { d -> _state.update { it.copy(popularDests = d) } }
+                .onSuccess { d -> _state.update { it.copy(popularDests = d.items) } }
                 .onFailure {
                     Log.e(TAG, "fetchDestinations failed", it)
                     _state.update { it.copy(popularLoadFailed = true) }

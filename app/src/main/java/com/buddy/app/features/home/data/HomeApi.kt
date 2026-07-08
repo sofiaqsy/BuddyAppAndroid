@@ -31,8 +31,9 @@ interface HomeApi {
         @Query("source") source: String,   // "place" | "destination"
     ): ApiPlaceContext
 
+    /** OJO: responde envuelto en { items: [...] }, no un array plano. */
     @GET("destinations")
-    suspend fun destinations(@Query("limit") limit: Int = 5): List<ApiDestination>
+    suspend fun destinations(@Query("limit") limit: Int = 5): DestinationsResponse
 
     @GET("feed/stories")
     suspend fun feedStories(
@@ -91,3 +92,6 @@ data class ApiResolvedPlace(val id: String, val name: String, val city: String? 
 
 @Serializable
 data class SearchResponse(val items: List<ApiPlaceResult>)
+
+@Serializable
+data class DestinationsResponse(val items: List<com.buddy.app.core.data.model.ApiDestination>)
