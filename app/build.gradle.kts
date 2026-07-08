@@ -19,9 +19,10 @@ android {
         versionName = "1.0.0"
 
         buildConfigField("String", "API_BASE_URL", "\"https://buddy-core-504b393f8333.herokuapp.com/v1/\"")
-        // Web client ID de Google Cloud Console (mismo proyecto que usa iOS).
-        // Reemplazar por el ID real antes de probar Sign in with Google.
-        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"TODO.apps.googleusercontent.com\"")
+        // Web client ID de Google Cloud Console (proyecto BuddyApp, el mismo de iOS).
+        // Credential Manager lo usa como serverClientId; el backend valida el aud
+        // contra GOOGLE_CLIENT_IDS (debe incluir este ID).
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"975826303754-4iofupldjki8bmgd0rvfgrpfto5t1psl.apps.googleusercontent.com\"")
     }
 
     buildTypes {
