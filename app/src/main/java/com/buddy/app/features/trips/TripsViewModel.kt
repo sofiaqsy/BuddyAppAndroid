@@ -28,6 +28,7 @@ class TripsViewModel @Inject constructor(
     private val tripRepo: TripRepository,
     private val travelerRepo: TravelerRepository,
     private val matchingRepo: com.buddy.app.features.matching.data.MatchingRepository,
+    private val sse: com.buddy.app.core.network.SseClient,
 ) : ViewModel() {
 
     data class TripsState(
@@ -55,7 +56,28 @@ class TripsViewModel @Inject constructor(
 
     private var searchJob: Job? = null
 
-    init { load() }
+    init {
+        load()
+        observeRealtime()
+    }
+
+    /**
+     * Tiempo real de Tu trip — el stream SSE global emite match/offer/message:
+     * si el buddy (o el propio usuario desde el chat) cierra la ayuda, la fila
+     * "¿Una duda en X?" se actualiza sin salir del tab. Debounce anti-ráfagas.
+     */
+    private var realtimeJob: Job? = null
+    private fun observeRealtime() {
+        viewModelScope.launch {
+            sse.events("stream").collect {
+                realtimeJob?.cancel()
+                realtimeJob = viewModelScope.launch {
+                    delay(800)
+                    load()
+                }
+            }
+        }
+    }
 
     fun load() {
         viewModelScope.launch {

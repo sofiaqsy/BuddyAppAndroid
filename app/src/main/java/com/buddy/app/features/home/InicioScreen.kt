@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Coffee
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.CircularProgressIndicator
@@ -88,6 +89,7 @@ fun InicioScreen(
     modifier: Modifier = Modifier,
     onOpenTrips: () -> Unit = {},
     onOpenConexiones: () -> Unit = {},
+    onOpenChat: (matchId: String, initialCategory: String?) -> Unit = { _, _ -> },
     viewModel: HomeViewModel = hiltViewModel(),
     matchingViewModel: MatchingViewModel = hiltViewModel(),
 ) {
@@ -112,7 +114,8 @@ fun InicioScreen(
         return
     }
 
-    val isFindingBuddy = searchState is MatchingViewModel.SearchState.Searching
+    val isPioneerRegistering by matchingViewModel.isPioneerRegistering.collectAsState()
+    val isFindingBuddy = searchState is MatchingViewModel.SearchState.Searching || isPioneerRegistering
 
     Column(
         modifier.fillMaxSize().background(BuddyColor.Canvas).verticalScroll(rememberScrollState()),
@@ -140,6 +143,9 @@ fun InicioScreen(
         }
 
         // ── Composer (con o sin trip — mismo layout, distinto destino) ─────
+        // Box: el loader flota centrado sobre el composer dimmeado mientras la
+        // intención se procesa (pioneer: trip + solicitud) — paridad con iOS.
+        Box {
         Column(Modifier.padding(horizontal = Spacing.edge).alpha(if (isFindingBuddy) 0.5f else 1f)) {
             LocationContext(
                 city = state.destinationName,
@@ -162,7 +168,12 @@ fun InicioScreen(
                     // trip + solicitud y a "Tu trip"; pioneer sin destino pero con
                     // GPS → pioneerHelpFlow; sin nada → registro de trip.
                     val isPioneer = state.communityContext?.totalBuddies == 0
+                    val activeMatchId = state.activeMatchId
                     when {
+                        // Buddy asignado: la intención va como card al chat existente
+                        // (espejo de checkStatus en iOS: match activo → chat directo
+                        // con chosenCategory → category_card como primer mensaje).
+                        activeMatchId != null -> onOpenChat(activeMatchId, category)
                         state.activeBuddyName != null -> onOpenConexiones()
                         // Pioneer: sin buddies no hay nada que buscar — registra
                         // trip + solicitud en silencio y navega a "Tu trip" (iOS).
@@ -180,11 +191,63 @@ fun InicioScreen(
                     }
                 },
             )
-            Spacer(Modifier.height(Spacing.xs))
-            RegisterCtaCard(onTap = onOpenTrips)
+            Spacer(Modifier.height(Spacing.md))
+
+            // ── Assigned buddy card (if active match) ────────────────────────
+            val activeBuddy = state.activeBuddyName
+            if (activeBuddy != null) {
+                AssignedBuddyCard(
+                    buddyName = activeBuddy,
+                    buddyAvatarUrl = state.activeBuddyAvatarUrl,
+                    lastMessage = state.lastBuddyMessage,
+                    isLastFromMe = state.isLastMessageFromMe,
+                    unreadCount = state.unreadMessageCount,
+                    onTap = { state.activeMatchId?.let { onOpenChat(it, null) } },
+                )
+                Spacer(Modifier.height(Spacing.md))
+            }
+
+            // "¿Vas a viajar?" solo sin trip — con uno vivo, el registro ya
+            // ocurrió y la card es ruido (mismo criterio en iOS).
+            if (state.activeJourney == null) {
+                RegisterCtaCard(onTap = onOpenTrips)
+            }
         }
 
-        Spacer(Modifier.height(Spacing.xl))
+        // Loader — cápsula con spinner mientras se registra la solicitud
+        if (isFindingBuddy) {
+            Row(
+                Modifier
+                    .align(Alignment.Center)
+                    .clip(RoundedCornerShape(50))
+                    .background(BuddyColor.Surface)
+                    .border(1.dp, BuddyColor.Border, RoundedCornerShape(50))
+                    .padding(horizontal = 18.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                androidx.compose.material3.CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    color = BuddyColor.Brand,
+                    strokeWidth = 2.dp,
+                )
+                Text("Registrando tu solicitud…", style = BuddyType.FootnoteBold, color = BuddyColor.Ink)
+            }
+        }
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        // ── Comunidad viva (recent help + pulse) ────────────────────────
+        CommunityLiveSection(
+            recentHelp = state.recentHelp,
+            communityPulse = state.communityPulse,
+            isLoading = state.isLoadingCommunity,
+            formatTimeAgo = viewModel::formatTimeAgo,
+            modifier = Modifier.padding(bottom = Spacing.lg),
+        )
+
+        Spacer(Modifier.height(7.dp))
         CommunitySection(
             stories = state.stories,
             isLoading = state.isLoadingFeed,
@@ -194,7 +257,7 @@ fun InicioScreen(
         Spacer(Modifier.height(100.dp))
     }
 
-    MatchingSheet(searchState, matchingViewModel, onOpenConexiones)
+    MatchingSheet(searchState, matchingViewModel, onOpenChat, onOpenConexiones)
 }
 
 // ── Location context — "Estás en X" / activar ubicación ───────────────────
@@ -265,13 +328,8 @@ private fun CategoryPicker(
     isLoading: Boolean,
     onRequest: (String) -> Unit,
 ) {
-    var selected by remember { mutableStateOf<BuddyCategory?>(null) }
     val noBuddies = activeBuddyName == null &&
         (communityContext?.let { it.buddies <= 0 && it.totalBuddies <= 0 } ?: true)
-    // canRequest — misma regla que iOS: categoría elegida, buddy activo, o
-    // pioneer (totalBuddies == 0) que no exige categoría.
-    val canRequest = selected != null || activeBuddyName != null ||
-        (communityContext != null && communityContext.totalBuddies == 0)
 
     Column {
         Spacer(Modifier.height(Spacing.md))
@@ -298,72 +356,18 @@ private fun CategoryPicker(
         Spacer(Modifier.height(Spacing.lg))
 
         // Grid 2×3 — icon square + title + subtitle (estilo exacto iOS)
+        // Tapping a category directly triggers the help request flow
         categories.chunked(2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 row.forEach { cat ->
                     CategoryCell(
                         category = cat,
-                        selected = selected == cat,
-                        onTap = { selected = if (selected == cat) null else cat },
+                        onTap = { onRequest(cat.apiKey) },
                         modifier = Modifier.weight(1f),
                     )
                 }
             }
             Spacer(Modifier.height(12.dp))
-        }
-
-        Spacer(Modifier.height(Spacing.md))
-
-        // CTA pill oscuro — burbuja/avatar + título dinámico + flecha/spinner
-        val ctaTitle = when {
-            activeBuddyName != null -> "Sigue hablando con $activeBuddyName"
-            noBuddies -> "Sé el primero en explorar"
-            else -> "Hablar con un buddy"
-        }
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(Radius.lg))
-                .background(if (canRequest) BuddyColor.Brand else BuddyColor.BrandDisabled)
-                .clickable(enabled = canRequest && !isLoading) {
-                    val cat = selected?.apiKey ?: "general"
-                    selected = null
-                    onRequest(cat)
-                }
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Box(
-                Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (activeBuddyAvatarUrl != null) {
-                    AsyncImage(
-                        model = activeBuddyAvatarUrl, contentDescription = null,
-                        contentScale = ContentScale.Crop, modifier = Modifier.size(44.dp),
-                    )
-                } else {
-                    Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, Modifier.size(18.dp), tint = Color.White)
-                }
-            }
-            Column(Modifier.weight(1f)) {
-                Text(ctaTitle, style = BuddyType.FootnoteBold, color = Color.White)
-                Text(
-                    availabilityText(communityContext, activeBuddyName),
-                    style = BuddyType.Caption1, color = Color.White.copy(alpha = 0.75f),
-                )
-            }
-            Box(
-                Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, Modifier.size(14.dp), tint = Color.White)
-                }
-            }
         }
     }
 }
@@ -371,7 +375,6 @@ private fun CategoryPicker(
 @Composable
 private fun CategoryCell(
     category: BuddyCategory,
-    selected: Boolean,
     onTap: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -380,11 +383,7 @@ private fun CategoryCell(
         modifier
             .clip(shape)
             .background(BuddyColor.Surface)
-            .border(
-                if (selected) 1.5.dp else 1.dp,
-                if (selected) BuddyColor.Brand.copy(alpha = 0.4f) else BuddyColor.Border,
-                shape,
-            )
+            .border(1.dp, BuddyColor.Border, shape)
             .clickable(onClick = onTap)
             .padding(12.dp),
         verticalAlignment = Alignment.Top,
@@ -394,22 +393,124 @@ private fun CategoryCell(
             Modifier
                 .size(40.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(if (selected) BuddyColor.Brand.copy(alpha = 0.12f) else BuddyColor.GroupedBg),
+                .background(BuddyColor.GroupedBg),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
                 category.icon, contentDescription = null, Modifier.size(16.dp),
-                tint = if (selected) BuddyColor.Brand else BuddyColor.Accent,
+                tint = BuddyColor.Accent,
             )
         }
         Column(Modifier.weight(1f)) {
             Text(
                 category.label, style = BuddyType.FootnoteBold,
-                color = if (selected) BuddyColor.Brand else BuddyColor.Ink, maxLines = 1,
+                color = BuddyColor.Ink, maxLines = 1,
             )
             Spacer(Modifier.height(2.dp))
             Text(category.subtitle, style = BuddyType.Caption1, color = BuddyColor.InkMuted, maxLines = 2)
         }
+    }
+}
+
+// ── Assigned Buddy Card ────────────────────────────────────────────────────
+@Composable
+private fun AssignedBuddyCard(
+    buddyName: String,
+    buddyAvatarUrl: String?,
+    onTap: () -> Unit,
+    modifier: Modifier = Modifier,
+    lastMessage: String? = null,
+    isLastFromMe: Boolean = false,
+    unreadCount: Int = 0,
+) {
+    val shape = RoundedCornerShape(Radius.md)
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(BuddyColor.Surface)
+            .border(1.5.dp, BuddyColor.Brand.copy(alpha = 0.25f), shape)
+            .clickable(onClick = onTap)
+            .padding(horizontal = Spacing.md, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+    ) {
+        Box {
+            Box(
+                Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .background(BuddyColor.SurfaceRaised),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (!buddyAvatarUrl.isNullOrEmpty()) {
+                    AsyncImage(
+                        model = buddyAvatarUrl,
+                        contentDescription = buddyName,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape),
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = null,
+                        tint = BuddyColor.InkMuted,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
+            if (unreadCount > 0) {
+                Box(
+                    Modifier
+                        .size(20.dp)
+                        .background(BuddyColor.ErrorRed, CircleShape)
+                        .align(Alignment.TopEnd),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "$unreadCount",
+                        style = BuddyType.Caption1.copy(fontWeight = FontWeight.Bold, fontSize = 12.sp),
+                        color = Color.White,
+                    )
+                }
+            }
+        }
+
+        Column(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                buildAnnotatedString {
+                    withStyle(SpanStyle(color = BuddyColor.InkMuted, fontSize = 12.sp)) {
+                        append("Tu buddy asignado ")
+                    }
+                    withStyle(SpanStyle(color = BuddyColor.Ink, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)) {
+                        append(buddyName)
+                    }
+                },
+                maxLines = 1,
+            )
+            if (!lastMessage.isNullOrEmpty()) {
+                Text(
+                    if (isLastFromMe) "Tú: $lastMessage" else lastMessage,
+                    style = BuddyType.Caption1,
+                    color = BuddyColor.InkMuted,
+                    maxLines = 1,
+                )
+            }
+        }
+
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+            contentDescription = null,
+            tint = BuddyColor.Brand,
+            modifier = Modifier.size(18.dp),
+        )
     }
 }
 
@@ -591,6 +692,7 @@ private fun RetryRow(onRetry: () -> Unit) {
 private fun MatchingSheet(
     searchState: MatchingViewModel.SearchState,
     viewModel: MatchingViewModel,
+    onOpenChat: (matchId: String, initialCategory: String?) -> Unit,
     onOpenConexiones: () -> Unit,
 ) {
     if (searchState is MatchingViewModel.SearchState.Idle) return
@@ -607,8 +709,18 @@ private fun MatchingSheet(
         ) {
             when (searchState) {
                 is MatchingViewModel.SearchState.Searching -> {
+                    val categoryLabel = when (searchState.category) {
+                        "transport" -> "Transporte"
+                        "accommodation" -> "Alojamiento"
+                        "food" -> "Comida"
+                        "translation" -> "Traducir"
+                        "activities" -> "Qué hacer"
+                        "emergency" -> "Seguridad"
+                        else -> "Ayuda"
+                    }
                     BuddyLoading(Modifier.height(60.dp))
                     Text("Buscando un buddy para ti…", style = BuddyType.Title3, color = BuddyColor.Ink)
+                    Text("Para: $categoryLabel", style = BuddyType.Headline, color = BuddyColor.Brand, fontWeight = FontWeight.SemiBold)
                     Text("Te conectaremos con la primera persona disponible.", style = BuddyType.Subhead, color = BuddyColor.InkMuted)
                     BuddyTextButton("Cancelar búsqueda", onClick = { viewModel.cancelSearch() })
                 }
@@ -618,7 +730,13 @@ private fun MatchingSheet(
                         "¡${searchState.buddy?.fullName ?: "Tu buddy"} está listo para ayudarte!",
                         style = BuddyType.Title3, color = BuddyColor.Ink,
                     )
-                    BuddyPrimaryButton("Ir a la conversación", onClick = { viewModel.dismiss(); onOpenConexiones() })
+                    BuddyPrimaryButton("Ir a la conversación", onClick = {
+                        // Chat directo con la card de la intención elegida (como iOS)
+                        val matchId = searchState.matchId
+                        val category = searchState.category
+                        viewModel.dismiss()
+                        onOpenChat(matchId, category)
+                    })
                 }
                 is MatchingViewModel.SearchState.Failed -> {
                     Text(searchState.message, style = BuddyType.Subhead, color = BuddyColor.InkMuted)

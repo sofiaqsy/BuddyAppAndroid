@@ -20,19 +20,24 @@ class AuthRepository @Inject constructor(
      *        para continuación de cuenta vía web OAuth en una fase posterior).
      */
     suspend fun socialLogin(provider: String, identityToken: String, fullName: String?): String {
-        val res = api.socialLogin(SocialRequest(provider, identityToken, fullName))
-        Log.d(TAG, "social/$provider → traveler=${res.travelerId.take(8)} status=${res.status}")
-        store.hydrate(res.travelerId, res.travelerToken, res.status, fullName)
+        // device_id → el backend crea la sesión de refresh device-bound y
+        // devuelve el secret; con él la sesión verified persiste para siempre.
+        val res = api.socialLogin(SocialRequest(provider, identityToken, fullName, store.deviceId()))
+        Log.d(TAG, "social/$provider → traveler=${res.travelerId.take(8)} status=${res.status} secret=${res.secret != null}")
+        store.hydrate(res.travelerId, res.travelerToken, res.status, fullName, secret = res.secret)
         return res.status
     }
 
     suspend fun completeProfile(fullName: String) {
         api.completeProfile(ProfileRequest(fullName))
+        // Preservar el secret de refresh — hydrate sin él lo borraría y la
+        // sesión moriría al expirar el JWT de 15 min.
         store.hydrate(
             travelerId = requireNotNull(store.current()).travelerId,
             token = requireNotNull(store.current()?.token),
             status = "verified",
             fullName = fullName,
+            secret = store.secret(),
         )
     }
 

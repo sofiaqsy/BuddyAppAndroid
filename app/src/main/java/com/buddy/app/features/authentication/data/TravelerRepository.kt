@@ -90,6 +90,16 @@ class TravelerRepository @Inject constructor(
         }
     }
 
+    /**
+     * Fuerza el refresh del JWT (tras un 401 en vuelo) — devuelve el token
+     * nuevo o null si la sesión ya no es recuperable. El mutex evita una
+     * estampida de refreshes cuando varios requests fallan a la vez.
+     */
+    suspend fun refreshNow(): String? = mutex.withLock {
+        val current = store.current() ?: return null
+        runCatching { forceRefresh(current) }.getOrNull()
+    }
+
     suspend fun clearSession() = store.clear()
 
     companion object { private const val TAG = "TravelerRepo" }

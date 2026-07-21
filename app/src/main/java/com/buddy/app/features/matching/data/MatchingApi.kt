@@ -3,11 +3,15 @@ package com.buddy.app.features.matching.data
 import com.buddy.app.core.data.model.ApiUserRef
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import okhttp3.MultipartBody
+import okhttp3.RequestBody
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.Multipart
 import retrofit2.http.PATCH
 import retrofit2.http.POST
+import retrofit2.http.Part
 import retrofit2.http.Path
 import retrofit2.http.Query
 
@@ -56,6 +60,38 @@ interface MatchingApi {
 
     @PATCH("messages/{matchId}/read")
     suspend fun markRead(@Path("matchId") matchId: String)
+
+    // Subida multipart — el backend crea el registro y devuelve el ApiMessage
+    // completo (mismos endpoints que uploadChatImage / AudioRecorderVM.upload en iOS).
+    @Multipart
+    @POST("messages/{matchId}/image")
+    suspend fun uploadImage(
+        @Path("matchId") matchId: String,
+        @Part("client_message_id") clientMessageId: RequestBody,
+        @Part image: MultipartBody.Part,
+    ): ApiMessage
+
+    @Multipart
+    @POST("messages/{matchId}/audio")
+    suspend fun uploadAudio(
+        @Path("matchId") matchId: String,
+        @Part("client_message_id") clientMessageId: RequestBody,
+        @Part audio: MultipartBody.Part,
+    ): ApiMessage
+
+    // ── Cierre / reputación / reporte (mismos endpoints que iOS) ──────────
+
+    @POST("matching/feedback")
+    suspend fun submitFeedback(@Body body: FeedbackBody)
+
+    @POST("users/report")
+    suspend fun reportUser(@Body body: ReportUserBody)
+
+    @GET("matching/request-info/{requestId}")
+    suspend fun requestInfo(@Path("requestId") requestId: String): ApiHelpRequestInfo
+
+    @GET("places")
+    suspend fun places(@Query("destination_id") destinationId: String): List<ApiPlace>
 }
 
 @Serializable
@@ -105,9 +141,42 @@ data class ApiMatch(
     @SerialName("traveler_id") val travelerId: String,
     @SerialName("buddy_id") val buddyId: String,
     val status: String,
+    @SerialName("matched_at") val matchedAt: String? = null,
+    @SerialName("completed_at") val completedAt: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
     val traveler: ApiUserRef? = null,
     val buddy: ApiUserRef? = null,
     @SerialName("feedback_submitted") val feedbackSubmitted: Boolean? = null,
+)
+
+@Serializable
+data class FeedbackBody(
+    @SerialName("match_id") val matchId: String,
+    val feeling: String,
+    @SerialName("commercial_pressure") val commercialPressure: String,
+)
+
+@Serializable
+data class ReportUserBody(
+    @SerialName("reported_user_id") val reportedUserId: String,
+    val reason: String,
+    val details: String? = null,
+    @SerialName("match_id") val matchId: String? = null,
+)
+
+@Serializable
+data class ApiHelpRequestInfo(
+    @SerialName("destination_id") val destinationId: String? = null,
+    val category: String? = null,
+)
+
+@Serializable
+data class ApiPlace(
+    val id: String,
+    val name: String,
+    val lat: Double = 0.0,
+    val lng: Double = 0.0,
+    @SerialName("place_type") val placeType: String? = null,
 )
 
 @Serializable
@@ -135,6 +204,7 @@ data class ApiMessage(
     val type: String? = null,
     val content: String? = null,
     @SerialName("image_url") val imageUrl: String? = null,
+    @SerialName("audio_url") val audioUrl: String? = null,
     @SerialName("read_at") val readAt: String? = null,
     @SerialName("created_at") val createdAt: String? = null,
     val users: ApiUserRef? = null,

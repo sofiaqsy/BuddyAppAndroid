@@ -50,6 +50,9 @@ data class SocialRequest(
     val provider: String,                              // "google" | "apple"
     @SerialName("identity_token") val identityToken: String,
     @SerialName("full_name") val fullName: String? = null,
+    // device_id permite al backend crear la sesión de refresh device-bound
+    // (igual que _postToBackend en iOS) — sin él no hay secret en la respuesta.
+    @SerialName("device_id") val deviceId: String? = null,
 )
 
 @Serializable
@@ -57,6 +60,9 @@ data class SocialResponse(
     @SerialName("traveler_id") val travelerId: String,
     @SerialName("traveler_token") val travelerToken: String,
     val status: String,
+    // Secret de refresh device-bound: el verified renueva su JWT en silencio
+    // vía /travelers/refresh, igual que un guest — la sesión persiste siempre.
+    val secret: String? = null,
 )
 
 @Serializable

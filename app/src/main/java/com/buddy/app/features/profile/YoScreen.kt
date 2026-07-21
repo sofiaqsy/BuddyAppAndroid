@@ -3,6 +3,8 @@ package com.buddy.app.features.profile
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.HowToReg
@@ -101,6 +104,45 @@ fun YoScreen(
     var showLogoutConfirm by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showBecomeBuddyConfirm by remember { mutableStateOf(false) }
+    var deletePublicationTarget by remember { mutableStateOf<ApiJourney?>(null) }
+    var viewerJourney by remember { mutableStateOf<ApiJourney?>(null) }
+    var showBuddyProfile by remember { mutableStateOf(false) }
+
+    // "Sé buddy en mi ciudad" a pantalla completa — espejo del NavigationLink
+    // hacia BuddyProfileView (iOS). Vive fuera del scroll del perfil.
+    val buddyProfile = state.buddyMe?.profile
+    if (showBuddyProfile && buddyProfile != null) {
+        BuddyProfileScreen(
+            profile = buddyProfile,
+            onBack = { showBuddyProfile = false },
+            onUpdated = { updated -> viewModel.applyBuddyProfileUpdate(updated) },
+        )
+        return
+    }
+
+    // El VM carga en init UNA vez — si el usuario se logueó después (p. ej.
+    // desde el flujo de publicar), el perfil quedaba con los datos del guest.
+    // Recargar cuando cambia la identidad del traveler (login/merge/logout).
+    androidx.compose.runtime.LaunchedEffect(session?.travelerId, session?.isVerified) {
+        if (session?.isVerified == true) viewModel.load()
+    }
+
+    // Selector de foto de perfil — espejo del PhotosPicker del avatar (iOS)
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val avatarPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    }.getOrNull()
+                }
+                if (bytes != null) viewModel.uploadAvatar(bytes)
+            }
+        }
+    }
 
     Column(modifier.fillMaxSize().background(BuddyColor.Canvas).verticalScroll(rememberScrollState())) {
         // ── Header editorial + menú de cuenta ──────────────────────────────
@@ -140,13 +182,28 @@ fun YoScreen(
             }
         } else {
             // 1 — Identidad
-            ProfileHeader(state, Modifier.padding(horizontal = Spacing.edge, vertical = Spacing.lg))
+            ProfileHeader(
+                state,
+                Modifier.padding(horizontal = Spacing.edge, vertical = Spacing.lg),
+                onPickAvatar = {
+                    avatarPicker.launch(
+                        androidx.activity.result.PickVisualMediaRequest(
+                            androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                        ),
+                    )
+                },
+            )
             // 2 — Bio
             BioSection(state, viewModel, Modifier.padding(horizontal = Spacing.edge))
             Spacer(Modifier.height(Spacing.xl))
             // 3 — Rol buddy: fila nav si es buddy; CTA discreto si no
             if (state.buddyMe?.isBuddy == true) {
-                BuddyNavRow(state, Modifier.padding(horizontal = Spacing.edge))
+                BuddyNavRow(
+                    state,
+                    Modifier
+                        .padding(horizontal = Spacing.edge)
+                        .clickable { showBuddyProfile = true },
+                )
             } else {
                 BecomeBuddyCTA(
                     isLoading = state.isBecomingBuddy,
@@ -158,9 +215,62 @@ fun YoScreen(
             // 4 — Colección
             StickerSection(state)
             Spacer(Modifier.height(Spacing.xl))
-            TripsSection(state, onOpenTrips)
+            TripsSection(
+                state, onOpenTrips,
+                onDeleteRequest = { deletePublicationTarget = it },
+                onOpenStory = { viewerJourney = it },
+            )
         }
         Spacer(Modifier.height(100.dp))
+    }
+
+    // Visor de historia — espejo de StoryViewerSheet (iOS): solo las fotos
+    viewerJourney?.let { journey ->
+        StoryViewerDialog(
+            journey = journey,
+            thumbsProvider = { viewModel.storyThumbs(journey) },
+            onDismiss = { viewerJourney = null },
+        )
+    }
+
+    // "¿Eliminar esta publicación?" — misma copy que iOS
+    deletePublicationTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deletePublicationTarget = null },
+            containerColor = BuddyColor.Surface,
+            title = { Text("¿Eliminar esta publicación?", style = BuddyType.Headline, color = BuddyColor.Ink) },
+            text = {
+                Text(
+                    "Se quitará de tu perfil y del feed de la comunidad. No se puede deshacer.",
+                    style = BuddyType.Subhead, color = BuddyColor.InkMuted,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.deletePublication(target); deletePublicationTarget = null }) {
+                    Text("Eliminar publicación", color = BuddyColor.ErrorRed, style = BuddyType.FootnoteBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletePublicationTarget = null }) {
+                    Text("Cancelar", color = BuddyColor.Brand, style = BuddyType.FootnoteBold)
+                }
+            },
+        )
+    }
+
+    // "No se pudo subir la foto" — misma copy que iOS
+    if (state.avatarUploadFailed) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { viewModel.dismissAvatarError() },
+            containerColor = BuddyColor.Surface,
+            title = { Text("No se pudo subir la foto", style = BuddyType.Headline, color = BuddyColor.Ink) },
+            text = { Text("Inténtalo de nuevo.", style = BuddyType.Subhead, color = BuddyColor.InkMuted) },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = { viewModel.dismissAvatarError() }) {
+                    Text("OK", color = BuddyColor.Brand, style = BuddyType.FootnoteBold)
+                }
+            },
+        )
     }
 
     // ── Diálogos — misma copy que iOS ──────────────────────────────────────
@@ -257,9 +367,14 @@ private fun AccountMenu(onLogout: () -> Unit, onDelete: () -> Unit) {
 
 // ── Profile header — avatar 88 + identidad ─────────────────────────────────
 @Composable
-private fun ProfileHeader(state: YoViewModel.State, modifier: Modifier = Modifier) {
+private fun ProfileHeader(
+    state: YoViewModel.State,
+    modifier: Modifier = Modifier,
+    onPickAvatar: () -> Unit = {},
+) {
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.lg)) {
-        Box {
+        // Avatar tapeable para cambiar la foto — espejo del PhotosPicker (iOS)
+        Box(Modifier.clickable(enabled = !state.isUploadingAvatar, onClick = onPickAvatar)) {
             Box(
                 Modifier.size(88.dp).clip(CircleShape).background(BuddyColor.GroupedBg),
                 contentAlignment = Alignment.Center,
@@ -272,8 +387,15 @@ private fun ProfileHeader(state: YoViewModel.State, modifier: Modifier = Modifie
                 } else {
                     Icon(Icons.Filled.Person, contentDescription = null, Modifier.size(36.dp), tint = BuddyColor.Brand)
                 }
+                if (state.isUploadingAvatar) {
+                    Box(
+                        Modifier.size(88.dp).background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.4f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(Modifier.size(24.dp), color = androidx.compose.ui.graphics.Color.White, strokeWidth = 2.dp)
+                    }
+                }
             }
-            // Badge cámara — el upload de avatar llega en la fase de Memoir/fotos
             Box(
                 Modifier
                     .align(Alignment.BottomEnd)
@@ -492,7 +614,12 @@ private fun SectionHeader(title: String, count: Int) {
 
 // ── Trips — grid 3 columnas con celdas fantasma ────────────────────────────
 @Composable
-private fun TripsSection(state: YoViewModel.State, onOpenTrips: () -> Unit) {
+private fun TripsSection(
+    state: YoViewModel.State,
+    onOpenTrips: () -> Unit,
+    onDeleteRequest: (ApiJourney) -> Unit = {},
+    onOpenStory: (ApiJourney) -> Unit = {},
+) {
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
         SectionHeader("TRIPS", state.journeys.size)
         if (state.journeys.isEmpty()) {
@@ -520,7 +647,12 @@ private fun TripsSection(state: YoViewModel.State, onOpenTrips: () -> Unit) {
                         Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                             rowCells.forEach { cell ->
                                 when (cell) {
-                                    is TripCell.Journey -> TripGridCell(cell.journey, Modifier.weight(1f))
+                                    is TripCell.Journey -> OwnedTripCell(
+                                        journey = cell.journey,
+                                        onTap = { onOpenStory(cell.journey) },
+                                        onDeleteRequest = { onDeleteRequest(cell.journey) },
+                                        modifier = Modifier.weight(1f),
+                                    )
                                     TripCell.Ghost -> Box(
                                         Modifier
                                             .weight(1f)
@@ -547,6 +679,121 @@ private fun TripsSection(state: YoViewModel.State, onOpenTrips: () -> Unit) {
 private sealed interface TripCell {
     data class Journey(val journey: ApiJourney) : TripCell
     data object Ghost : TripCell
+}
+
+/**
+ * Visor de historia publicada — espejo de StoryViewerSheet (iOS): pantalla
+ * completa fondo Canvas, pager de portadas (fit), dots en cápsula y X para
+ * cerrar. Sin conteos ni chrome extra: solo las fotos.
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun StoryViewerDialog(
+    journey: ApiJourney,
+    thumbsProvider: suspend () -> List<String>,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        val thumbs by androidx.compose.runtime.produceState(emptyList<String>(), journey.id) {
+            value = thumbsProvider()
+        }
+        Box(Modifier.fillMaxSize().background(BuddyColor.Canvas)) {
+            if (thumbs.isEmpty()) {
+                // Fallback: cover del destino mientras cargan (o si no hay páginas)
+                AsyncImage(
+                    model = journey.destination?.coverUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                val pagerState = androidx.compose.foundation.pager.rememberPagerState { thumbs.size }
+                androidx.compose.foundation.pager.HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                ) { i ->
+                    AsyncImage(
+                        model = thumbs[i],
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                if (thumbs.size > 1) {
+                    Row(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 24.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(BuddyColor.Surface.copy(alpha = 0.85f))
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        repeat(thumbs.size) { i ->
+                            Box(
+                                Modifier
+                                    .size(7.dp)
+                                    .background(
+                                        if (i == pagerState.currentPage) BuddyColor.Ink
+                                        else BuddyColor.Ink.copy(alpha = 0.25f),
+                                        CircleShape,
+                                    ),
+                            )
+                        }
+                    }
+                }
+            }
+            // Solo el botón de cerrar — sin conteos (como iOS)
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 8.dp, end = Spacing.edge)
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(BuddyColor.Surface.copy(alpha = 0.85f))
+                    .clickable(onClick = onDismiss),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Close, contentDescription = "Cerrar",
+                    Modifier.size(15.dp), tint = BuddyColor.Ink,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Celda del grid del DUEÑO del perfil: long-press → "Eliminar publicación"
+ * (espejo del .contextMenu de iOS en tripsSection).
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun OwnedTripCell(
+    journey: ApiJourney,
+    onTap: () -> Unit,
+    onDeleteRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var showMenu by remember { mutableStateOf(false) }
+    Box(modifier) {
+        TripGridCell(
+            journey,
+            Modifier.combinedClickable(
+                onClick = onTap,
+                onLongClick = { showMenu = true },
+            ),
+        )
+        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            DropdownMenuItem(
+                text = { Text("Eliminar publicación", color = BuddyColor.ErrorRed, style = BuddyType.Body) },
+                onClick = { showMenu = false; onDeleteRequest() },
+            )
+        }
+    }
 }
 
 @Composable

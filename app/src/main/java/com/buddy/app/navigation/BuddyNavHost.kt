@@ -1,8 +1,10 @@
 package com.buddy.app.navigation
 
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -12,6 +14,7 @@ import androidx.compose.ui.Modifier
 import com.buddy.app.core.designsystem.BuddyColor
 import com.buddy.app.features.conexiones.ConexionesScreen
 import com.buddy.app.features.home.InicioScreen
+import com.buddy.app.features.messages.ChatScreen
 import com.buddy.app.features.profile.YoScreen
 import com.buddy.app.features.trips.TripsScreen
 
@@ -24,11 +27,83 @@ import com.buddy.app.features.trips.TripsScreen
 @Composable
 fun BuddyRoot() {
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.Inicio) }
+    // Tap en notificación push (ej. "buddy_approved") — ver PendingTabNavigation.
+    val pendingTab by PendingTabNavigation.target.collectAsState()
+    LaunchedEffect(pendingTab) {
+        pendingTab?.let {
+            android.util.Log.d("[BuddyRoot]", "consuming pendingTab=$it")
+            selectedTab = it
+            PendingTabNavigation.consume()
+        }
+    }
+    var openChatId by rememberSaveable { mutableStateOf<String?>(null) }
+    var openChatCategory by rememberSaveable { mutableStateOf<String?>(null) }
+    // Editor Memoir a pantalla completa — como iOS oculta tab bar y nav bar.
+    // Par (journey, initialPage): -1 = nuevo momento, índice = editar página.
+    var bookJourney by androidx.compose.runtime.remember {
+        mutableStateOf<Pair<com.buddy.app.core.data.model.ApiJourney, Int>?>(null)
+    }
+    // Mapa del trip a pantalla completa (espejo de TripDetailView en iOS)
+    var mapJourney by androidx.compose.runtime.remember {
+        mutableStateOf<com.buddy.app.core.data.model.ApiJourney?>(null)
+    }
+
     // Mismo ViewModel (scope de Activity) que usa el tab Conexiones —
     // el badge refleja chatStore.totalUnread como en iOS.
     val conexionesVm: com.buddy.app.features.conexiones.ConexionesViewModel =
         androidx.hilt.navigation.compose.hiltViewModel()
     val conexionesState by conexionesVm.state.collectAsState()
+    // Misma instancia (scope de Activity) que usa InicioScreen — al cerrar el
+    // chat hay que refrescar trip+match o la card del buddy queda huérfana.
+    val homeVm: com.buddy.app.features.home.HomeViewModel =
+        androidx.hilt.navigation.compose.hiltViewModel()
+
+    // Mismo TripsViewModel (scope de Activity) que usa el tab — para refrescar
+    // la bitácora al volver del book.
+    val tripsVm: com.buddy.app.features.trips.TripsViewModel =
+        androidx.hilt.navigation.compose.hiltViewModel()
+
+    // Mapa del trip → pantalla completa sin tab bar (como TripDetailView, iOS)
+    mapJourney?.let { journey ->
+        com.buddy.app.features.trips.map.TripMapScreen(
+            journey = journey,
+            onBack = { mapJourney = null },
+        )
+        return
+    }
+
+    // Editor abierto → pantalla completa SIN tab bar ni chrome (como iOS:
+    // .toolbar(.hidden) + ignoresSafeArea). Flujo idéntico a TripEditorSheet:
+    // del tap en "Tu historia empieza aquí" se entra DIRECTO al editor.
+    bookJourney?.let { (journey, initialPage) ->
+        com.buddy.app.features.trips.memoir.TripEditorSheet(
+            journey = journey,
+            initialPage = initialPage,
+            onDismiss = { bookJourney = null; tripsVm.load() },
+        )
+        return
+    }
+
+    // Si hay chat abierto, mostrar ChatScreen en overlay.
+    // systemBarsPadding: el overlay vive fuera del Scaffold, sin él el header
+    // queda bajo la barra de estado y el input bajo la barra de gestos.
+    if (openChatId != null) {
+        ChatScreen(
+            matchId = openChatId!!,
+            title = "Chat",
+            initialCategory = openChatCategory,
+            onBack = {
+                openChatId = null; openChatCategory = null
+                conexionesVm.load()
+                homeVm.refreshTripState()
+                // La fila "¿Una duda en X?" de Tu trip depende del match — si el
+                // usuario cerró la ayuda dentro del chat, hay que recargarla.
+                tripsVm.load()
+            },
+            modifier = Modifier.systemBarsPadding(),
+        )
+        return
+    }
 
     Scaffold(
         containerColor = BuddyColor.Canvas,
@@ -47,8 +122,18 @@ fun BuddyRoot() {
                 modifier,
                 onOpenTrips = { selectedTab = AppTab.Trips },
                 onOpenConexiones = { selectedTab = AppTab.Conexiones },
+                onOpenChat = { matchId, category ->
+                    openChatCategory = category
+                    openChatId = matchId
+                },
             )
-            AppTab.Trips -> TripsScreen(modifier, onOpenConexiones = { selectedTab = AppTab.Conexiones })
+            AppTab.Trips -> TripsScreen(
+                modifier,
+                onOpenConexiones = { selectedTab = AppTab.Conexiones },
+                onOpenBook = { journey, page -> bookJourney = journey to page },
+                onOpenMap = { mapJourney = it },
+                onPublished = { selectedTab = AppTab.Inicio },
+            )
             AppTab.Conexiones -> ConexionesScreen(modifier, onOpenTrips = { selectedTab = AppTab.Trips })
             AppTab.Yo -> YoScreen(modifier, onOpenTrips = { selectedTab = AppTab.Trips })
         }

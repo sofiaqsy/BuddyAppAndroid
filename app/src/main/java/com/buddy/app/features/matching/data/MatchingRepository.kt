@@ -3,8 +3,19 @@ package com.buddy.app.features.matching.data
 import com.buddy.app.core.network.SseClient
 import com.buddy.app.core.network.SseEvent
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/**
+ * El backend impone UNA solicitud activa por traveler: si ya existe (p. ej.
+ * quedó huérfana al minimizar/matar la app en plena búsqueda), POST
+ * /matching/request responde 409 con el request_id existente — esta excepción
+ * lo transporta para que la UI reanude ESA búsqueda en vez de fallar.
+ */
+class ActiveRequestExists(val requestId: String?) : Exception("active_request_exists")
 
 /**
  * Matching — el SSE es la fuente de verdad primaria (evento "matched")
@@ -16,7 +27,19 @@ class MatchingRepository @Inject constructor(
     private val sse: SseClient,
 ) {
     suspend fun createHelpRequest(destinationId: String?, category: String, description: String? = null, journeyId: String? = null): ApiHelpRequest =
-        api.createHelpRequest(HelpRequestBody(destinationId, category, description, journeyId))
+        try {
+            api.createHelpRequest(HelpRequestBody(destinationId, category, description, journeyId))
+        } catch (e: retrofit2.HttpException) {
+            if (e.code() == 409) {
+                val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
+                val requestId = runCatching {
+                    Json.parseToJsonElement(body ?: "")
+                        .jsonObject["request_id"]?.jsonPrimitive?.content
+                }.getOrNull()
+                throw ActiveRequestExists(requestId)
+            }
+            throw e
+        }
 
     suspend fun cancelRequest(requestId: String) = api.cancelRequest(requestId)
 

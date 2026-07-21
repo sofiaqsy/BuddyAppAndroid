@@ -27,8 +27,8 @@ class MatchingViewModel @Inject constructor(
 
     sealed interface SearchState {
         data object Idle : SearchState
-        data class Searching(val requestId: String, val position: Int? = null, val total: Int? = null) : SearchState
-        data class Matched(val matchId: String, val buddy: ApiUserRef?) : SearchState
+        data class Searching(val requestId: String, val category: String? = null, val position: Int? = null, val total: Int? = null) : SearchState
+        data class Matched(val matchId: String, val buddy: ApiUserRef?, val category: String? = null) : SearchState
         data class Failed(val message: String) : SearchState
     }
 
@@ -59,6 +59,10 @@ class MatchingViewModel @Inject constructor(
     private val _pioneerConfirmation = MutableStateFlow<String?>(null)
     val pioneerConfirmation: StateFlow<String?> = _pioneerConfirmation.asStateFlow()
 
+    /** true mientras el flujo pioneer crea trip + solicitud — alimenta el loader del Home. */
+    private val _isPioneerRegistering = MutableStateFlow(false)
+    val isPioneerRegistering: StateFlow<Boolean> = _isPioneerRegistering.asStateFlow()
+
     /**
      * Flujo pioneer — espejo EXACTO de pioneerHelpFlow (iOS): sin buddies no
      * hay nada que buscar, así que NO abre el modal de búsqueda. Crea el trip
@@ -74,17 +78,31 @@ class MatchingViewModel @Inject constructor(
         onDone: () -> Unit,
     ) {
         viewModelScope.launch {
+            _isPioneerRegistering.value = true
             try {
                 val journey = when {
                     destinationId != null -> tripRepo.ensureActiveTrip(destinationId)
                     lat != null && lng != null -> tripRepo.ensureActiveTripForGps(lat, lng)
                     else -> return@launch
                 }
-                repo.createHelpRequest(
-                    destinationId = journey.destination?.id ?: journey.destinationId,
-                    category = category,
-                    journeyId = journey.id,
-                )
+                try {
+                    repo.createHelpRequest(
+                        destinationId = journey.destination?.id ?: journey.destinationId,
+                        category = category,
+                        journeyId = journey.id,
+                    )
+                } catch (e: com.buddy.app.features.matching.data.ActiveRequestExists) {
+                    // Solicitud huérfana previa: cancelarla y reintentar una vez —
+                    // el flujo pioneer promete registro en silencio, sin modal.
+                    val orphan = e.requestId ?: throw e
+                    Log.d(TAG, "pioneer 409 → cancelando huérfana ${orphan.take(8)} y reintentando")
+                    repo.cancelRequest(orphan)
+                    repo.createHelpRequest(
+                        destinationId = journey.destination?.id ?: journey.destinationId,
+                        category = category,
+                        journeyId = journey.id,
+                    )
+                }
                 val city = cityName ?: "tu zona"
                 _pioneerConfirmation.value =
                     "Registramos tu solicitud en $city. Te avisaremos cuando haya un buddy disponible."
@@ -93,6 +111,8 @@ class MatchingViewModel @Inject constructor(
             } catch (e: Exception) {
                 Log.e(TAG, "pioneer flow failed", e)
                 _state.value = SearchState.Failed("No pudimos enviar tu solicitud. Inténtalo de nuevo.")
+            } finally {
+                _isPioneerRegistering.value = false
             }
         }
     }
@@ -101,14 +121,59 @@ class MatchingViewModel @Inject constructor(
 
     private fun startRequest(destinationId: String?, category: String, description: String?, journeyId: String?) {
         viewModelScope.launch {
-            try {
-                val request = repo.createHelpRequest(destinationId, category, description, journeyId)
-                _state.value = SearchState.Searching(request.id)
-                startSse(request.id)
-                startRecoveryPoll(request.id)
-            } catch (e: Exception) {
-                Log.e(TAG, "createHelpRequest failed", e)
-                _state.value = SearchState.Failed("No pudimos enviar tu solicitud. Inténtalo de nuevo.")
+            // Esperar un cancel en vuelo: sin esto el POST puede llegar al
+            // servidor ANTES que el DELETE del cancel anterior y devuelve 409
+            // sobre una solicitud que está a punto de morir (la carrera del
+            // "minimizo y vuelvo a pedir de inmediato").
+            cancelJob?.join()
+            var retried = false
+            while (true) {
+                try {
+                    val request = repo.createHelpRequest(destinationId, category, description, journeyId)
+                    _state.value = SearchState.Searching(request.id, category)
+                    startSse(request.id)
+                    startRecoveryPoll(request.id)
+                    return@launch
+                } catch (e: com.buddy.app.features.matching.data.ActiveRequestExists) {
+                    val existingId = e.requestId
+                    if (existingId == null) {
+                        _state.value = SearchState.Failed("Ya tienes una solicitud activa. Inténtalo en un momento.")
+                        return@launch
+                    }
+                    // ¿La huérfana sigue viva de verdad? Solo reanudar si busca.
+                    val st = runCatching { repo.status(existingId).status }.getOrNull()
+                    when {
+                        st == "matched" -> { transitionToMatched(); return@launch }
+                        st == "searching" || st == null -> {
+                            Log.d(TAG, "409 → resuming request ${existingId.take(8)}")
+                            _state.value = SearchState.Searching(existingId, category)
+                            startSse(existingId)
+                            startRecoveryPoll(existingId)
+                            return@launch
+                        }
+                        else -> {
+                            // cancelled/failed: la huérfana ya murió — asegurar
+                            // su desactivación y crear una nueva (un solo retry)
+                            if (retried) {
+                                _state.value = SearchState.Failed("No pudimos enviar tu solicitud. Inténtalo de nuevo.")
+                                return@launch
+                            }
+                            retried = true
+                            runCatching { repo.cancelRequest(existingId) }
+                        }
+                    }
+                } catch (e: retrofit2.HttpException) {
+                    Log.e(TAG, "createHelpRequest HTTP ${e.code()}", e)
+                    _state.value = SearchState.Failed(
+                        if (e.code() == 429) "Demasiadas solicitudes en poco tiempo. Espera un minuto e inténtalo de nuevo."
+                        else "No pudimos enviar tu solicitud. Inténtalo de nuevo.",
+                    )
+                    return@launch
+                } catch (e: Exception) {
+                    Log.e(TAG, "createHelpRequest failed", e)
+                    _state.value = SearchState.Failed("No pudimos enviar tu solicitud. Inténtalo de nuevo.")
+                    return@launch
+                }
             }
         }
     }
@@ -138,7 +203,7 @@ class MatchingViewModel @Inject constructor(
         runCatching { repo.status(requestId) }.onSuccess { s ->
             when (s.status) {
                 "matched" -> transitionToMatched()
-                "searching" -> _state.value = current.copy(position = s.position, total = s.total)
+                "searching" -> _state.value = SearchState.Searching(requestId, current.category, s.position, s.total)
                 "failed" -> fail("Ningún buddy está disponible ahora. Inténtalo más tarde.")
                 "cancelled" -> _state.value = SearchState.Idle
             }
@@ -146,10 +211,11 @@ class MatchingViewModel @Inject constructor(
     }
 
     private suspend fun transitionToMatched() {
+        val category = (_state.value as? SearchState.Searching)?.category
         val active = runCatching { repo.matches() }.getOrNull()
             ?.firstOrNull { it.status in listOf("pending", "accepted", "active") } ?: return
         stopStreams()
-        _state.value = SearchState.Matched(active.id, active.buddy)
+        _state.value = SearchState.Matched(active.id, active.buddy, category)
     }
 
     private fun fail(message: String) {
@@ -157,10 +223,13 @@ class MatchingViewModel @Inject constructor(
         _state.value = SearchState.Failed(message)
     }
 
+    /** Cancel en vuelo — startRequest lo espera antes de crear otra solicitud. */
+    private var cancelJob: Job? = null
+
     fun cancelSearch() {
         val searching = _state.value as? SearchState.Searching ?: return
         stopStreams()
-        viewModelScope.launch { runCatching { repo.cancelRequest(searching.requestId) } }
+        cancelJob = viewModelScope.launch { runCatching { repo.cancelRequest(searching.requestId) } }
         _state.value = SearchState.Idle
     }
 

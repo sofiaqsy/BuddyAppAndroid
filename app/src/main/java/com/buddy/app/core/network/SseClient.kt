@@ -2,10 +2,12 @@ package com.buddy.app.core.network
 
 import android.util.Log
 import com.buddy.app.BuildConfig
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -48,10 +50,12 @@ class SseClient @Inject constructor(
                     streamClient.newCall(request).execute().use { response ->
                         if (!response.isSuccessful) throw java.io.IOException("SSE HTTP ${response.code}")
                         attempt = 0
+                        Log.d(TAG, "SSE $path connected (proto=${response.protocol})")
                         val source = response.body!!.source()
                         var eventName: String? = null
                         while (isActive) {
                             val line = source.readUtf8Line() ?: break
+                            if (line.startsWith(":")) Log.d(TAG, "SSE $path heartbeat")
                             when {
                                 line.startsWith("event:") -> eventName = line.removePrefix("event:").trim()
                                 line.startsWith("data:") -> {
@@ -64,7 +68,7 @@ class SseClient @Inject constructor(
                     }
                 } catch (e: Exception) {
                     if (!isActive) break
-                    Log.w(TAG, "SSE $path dropped: ${e.message}")
+                    Log.w(TAG, "SSE $path dropped: ${e.javaClass.simpleName}: ${e.message}")
                 }
                 if (!isActive) break
                 attempt++
@@ -72,7 +76,9 @@ class SseClient @Inject constructor(
             }
         }
         awaitClose { job.cancel() }
-    }
+    }.flowOn(Dispatchers.IO)
+    // flowOn: execute() es bloqueante — en Main lanza NetworkOnMainThreadException
+    // y el stream muere antes de conectar (los ViewModels colectan en Main).
 
     companion object { private const val TAG = "SseClient" }
 }

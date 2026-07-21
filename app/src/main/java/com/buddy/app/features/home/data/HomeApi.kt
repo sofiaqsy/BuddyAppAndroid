@@ -5,6 +5,8 @@ import com.buddy.app.core.data.model.ApiJourney
 import com.buddy.app.core.data.model.ApiLocationResolution
 import com.buddy.app.core.data.model.ApiPlaceContext
 import com.buddy.app.core.data.model.ApiPlaceResult
+import com.buddy.app.core.data.model.ApiRecentHelp
+import com.buddy.app.core.data.model.ApiPulseResponse
 import com.buddy.app.core.data.model.FeedPage
 import kotlinx.serialization.Serializable
 import retrofit2.Response
@@ -66,6 +68,38 @@ interface HomeApi {
     /** Cancela el VIAJE completo (todos sus lugares + apoyos en curso). */
     @retrofit2.http.DELETE("trips/{id}")
     suspend fun cancelTrip(@retrofit2.http.Path("id") tripId: String)
+
+    // ── Memoir: publicar trip (espejo de publishJourney en APIClient.swift) ──
+
+    /** Sube las portadas (thumbnails JPEG) del journey vía buddy-core. */
+    @retrofit2.http.Multipart
+    @POST("journeys/{id}/pages/upload")
+    suspend fun uploadJourneyPages(
+        @Path("id") journeyId: String,
+        @retrofit2.http.Part parts: List<okhttp3.MultipartBody.Part>,
+    )
+
+    @retrofit2.http.PATCH("journeys/{id}")
+    suspend fun publishJourney(
+        @Path("id") journeyId: String,
+        @Body body: PublishBody,
+    )
+
+    @retrofit2.http.PATCH("trips/{id}")
+    suspend fun publishTrip(
+        @Path("id") tripId: String,
+        @Body body: PublishBody,
+    )
+
+    // ── Comunidad viva (recent help + pulse) ────────────────────────────
+
+    /** GET /places/{id}/recent-help — actividad reciente en un destino. */
+    @GET("places/{id}/recent-help")
+    suspend fun recentHelpByPlace(@Path("id") placeId: String): List<ApiRecentHelp>
+
+    /** GET /community/pulse — pulso global cuando no hay actividad local. */
+    @GET("community/pulse")
+    suspend fun communityPulse(): ApiPulseResponse
 }
 
 @kotlinx.serialization.Serializable
@@ -83,6 +117,15 @@ data class CreateJourneyBody(
 
 @kotlinx.serialization.Serializable
 data class JourneyStatusBody(val status: String)
+
+@kotlinx.serialization.Serializable
+data class PublishBody(
+    // SIN valores por defecto: kotlinx.serialization omite los campos default
+    // al serializar (encodeDefaults=false) y el PATCH viajaba con body {} —
+    // el backend respondía 200 sin publicar nada.
+    val status: String,
+    @kotlinx.serialization.SerialName("is_public") val isPublic: Boolean,
+)
 
 @Serializable
 data class ResolveRequest(val lat: Double, val lng: Double)

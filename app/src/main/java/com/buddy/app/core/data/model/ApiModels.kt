@@ -92,6 +92,7 @@ data class ApiJourney(
     @SerialName("sticker_count") val stickerCount: Int? = null,
     @SerialName("page_thumbs") val pageThumbs: List<String>? = null,
     @SerialName("trip_id") val tripId: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
 )
 
 // Página del feed "Historias de viajeros"
@@ -100,4 +101,62 @@ data class FeedPage(
     val items: List<ApiJourney>,
     @SerialName("next_cursor") val nextCursor: String? = null,
     @SerialName("has_more") val hasMore: Boolean = false,
+)
+
+// MARK: – Matching & Help Requests
+
+// GET /matching/requests/:id/status — estado de búsqueda de buddy
+@Serializable
+data class ApiMatchingStatus(
+    val status: String,         // "searching" | "matched" | "failed" | "cancelled" | "none"
+    val position: Int? = null,  // candidato actual (1-based), solo cuando searching
+    val total: Int? = null,     // total de candidatos, solo cuando searching
+    val buddy: ApiUserRef? = null,  // solo cuando status == "matched"
+)
+
+// GET /matching/matches o POST /matching/requests/:id/accept
+@Serializable
+data class ApiMatch(
+    val id: String,
+    @SerialName("request_id") val requestId: String,
+    @SerialName("traveler_id") val travelerId: String,
+    @SerialName("buddy_id") val buddyId: String,
+    val status: String,         // "pending" | "accepted" | "active" | "completed"
+    @SerialName("matched_at") val matchedAt: String? = null,
+    @SerialName("completed_at") val completedAt: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+    val traveler: ApiUserRef? = null,
+    val buddy: ApiUserRef? = null,
+)
+
+// POST /matching/requests — crear solicitud de ayuda
+@Serializable
+data class ApiHelpRequest(
+    @SerialName("destination_id") val destinationId: String? = null,
+    val category: String,       // "transport" | "accommodation" | "food" | etc.
+    val description: String? = null,
+)
+
+// GET /places/:id/recent-help — actividad local en un destino
+@Serializable
+data class ApiRecentHelp(
+    val id: String,
+    @SerialName("completed_at") val completedAt: String? = null,
+    val buddy: ApiUserRef? = null,
+)
+
+// GET /community/pulse — pulso global de la red cuando no hay actividad local
+@Serializable
+data class ApiPulseItem(
+    val type: String,          // "traveling" | "helped" | "ready"
+    val city: String,
+    val count: Int? = null,
+    val at: String? = null,
+) {
+    val id: String get() = "$type-$city-${at ?: 0}"
+}
+
+@Serializable
+data class ApiPulseResponse(
+    val items: List<ApiPulseItem>,
 )

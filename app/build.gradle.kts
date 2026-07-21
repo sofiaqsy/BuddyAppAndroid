@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -19,10 +20,12 @@ android {
         versionName = "1.0.0"
 
         buildConfigField("String", "API_BASE_URL", "\"https://buddy-core-504b393f8333.herokuapp.com/v1/\"")
-        // Web client ID de Google Cloud Console (proyecto BuddyApp, el mismo de iOS).
-        // Credential Manager lo usa como serverClientId; el backend valida el aud
-        // contra GOOGLE_CLIENT_IDS (debe incluir este ID).
-        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"975826303754-4iofupldjki8bmgd0rvfgrpfto5t1psl.apps.googleusercontent.com\"")
+        // Client "Buddy App Web" (tipo Aplicación web) del proyecto BuddyApp —
+        // GetGoogleIdOption.serverClientId EXIGE un cliente web, nunca uno tipo
+        // Android (usar el Android daba 28444). El backend valida el aud contra
+        // GOOGLE_CLIENT_IDS (debe incluir este ID).
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"975826303754-2c8f1c4mjif0f0nn56gappm2l8k6h99m.apps.googleusercontent.com\"")
+
     }
 
     buildTypes {
@@ -78,6 +81,18 @@ dependencies {
     implementation(libs.androidx.credentials.play.services)
     implementation(libs.googleid)
     implementation(libs.play.services.location)
+
+    // Mapa del trip (espejo de TripDetailView/MapKit en iOS) — OpenStreetMap:
+    // sin API key ni cuenta de Google Cloud, tiles libres con atribución.
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
+
+    // Firebase Cloud Messaging
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
+
+    // ML Kit Subject Segmentation — sticker (subject lift) del Trip Book,
+    // equivalente Android del VNGenerateForegroundInstanceMaskRequest de iOS
+    implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
 
     testImplementation(libs.junit)
 }

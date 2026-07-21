@@ -56,6 +56,7 @@ import com.buddy.app.core.designsystem.BuddyType
 import com.buddy.app.core.designsystem.Radius
 import com.buddy.app.core.designsystem.Spacing
 import com.buddy.app.core.designsystem.components.BuddyLoading
+import kotlinx.coroutines.launch
 
 /**
  * Espejo 1:1 de TripsView (iOS):
@@ -70,11 +71,62 @@ import com.buddy.app.core.designsystem.components.BuddyLoading
 fun TripsScreen(
     modifier: Modifier = Modifier,
     onOpenConexiones: () -> Unit = {},
+    /** Abre el editor Memoir a pantalla completa — el overlay vive en BuddyRoot,
+     *  fuera del Scaffold. page: -1 = nuevo momento, índice = editar página. */
+    onOpenBook: (ApiJourney, Int) -> Unit = { _, _ -> },
+    /** Abre el mapa del trip a pantalla completa (overlay en BuddyRoot, como iOS). */
+    onOpenMap: (ApiJourney) -> Unit = {},
+    /** Tras publicar: volver al Inicio (espejo de AppRouter.switchTo(.inicio)). */
+    onPublished: () -> Unit = {},
     viewModel: TripsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
     var showCancelConfirm by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<ApiJourney?>(null) }
+
+    // ── Publicar historia — gate de identidad + confirmación (espejo iOS) ──
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val sessionVm: com.buddy.app.features.authentication.SessionViewModel = hiltViewModel()
+    val session by sessionVm.session.collectAsState()
+    val isSigningIn by sessionVm.isSigningIn.collectAsState()
+    val signInError by sessionVm.error.collectAsState()
+    val publishVm: com.buddy.app.features.trips.memoir.MemoirPublishViewModel = hiltViewModel()
+    val persistence = remember {
+        com.buddy.app.features.trips.memoir.MemoirPersistence(context.applicationContext)
+    }
+    var showPublishConfirm by remember { mutableStateOf(false) }
+    var showLoginSheet by remember { mutableStateOf(false) }
+    var showBlankAlert by remember { mutableStateOf(false) }
+    var isPublishing by remember { mutableStateOf(false) }
+
+    // Espejo del onDismiss del IdentitySheet(purpose: .publish) en iOS:
+    // al completar el login con el sheet abierto → disparar la confirmación.
+    androidx.compose.runtime.LaunchedEffect(session?.isVerified) {
+        if (session?.isVerified == true && showLoginSheet) {
+            showLoginSheet = false
+            showPublishConfirm = true
+        }
+    }
+
+    fun publishSelectedTrip() {
+        val journey = state.selectedTrip ?: return
+        scope.launch {
+            isPublishing = true
+            val pages = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                persistence.load(journey.id)
+            }.filter { it.itemSnapshots.isNotEmpty() || it.backgroundImageFile != null }
+            if (pages.isEmpty()) {
+                isPublishing = false
+                showBlankAlert = true
+                return@launch
+            }
+            publishVm.publish(journey, pages, persistence)
+            isPublishing = false
+            viewModel.load()
+            onPublished()
+        }
+    }
 
     // Registro a pantalla completa — espejo del navigation push de iOS
     if (state.showRegisterSheet) {
@@ -138,7 +190,14 @@ fun TripsScreen(
                 journey = state.selectedTrip!!,
                 buddyName = state.activeBuddyName,
                 buddyAvatarUrl = state.activeBuddyAvatarUrl,
-                onEdit = { /* editor de momentos (Memoir) — próxima fase */ },
+                onEdit = { page -> state.selectedTrip?.let { onOpenBook(it, page) } },
+                onMapTap = { state.selectedTrip?.let(onOpenMap) },
+                // Sin login → sheet de identidad; con login → confirmación (iOS)
+                onPublishTap = {
+                    if (session?.isVerified == true) showPublishConfirm = true
+                    else showLoginSheet = true
+                },
+                isPublishing = isPublishing,
                 onBuddyTap = onOpenConexiones,
                 modifier = Modifier.padding(horizontal = Spacing.edge),
             )
@@ -197,6 +256,94 @@ fun TripsScreen(
                 }
             },
         )
+    }
+
+    // Confirmación "¿Publicar esta historia?" — misma copy que iOS
+    if (showPublishConfirm) {
+        AlertDialog(
+            onDismissRequest = { showPublishConfirm = false },
+            containerColor = BuddyColor.Surface,
+            title = { Text("¿Publicar esta historia?", style = BuddyType.Headline, color = BuddyColor.Ink) },
+            text = {
+                Text(
+                    "Tu historia quedará visible para la comunidad. Después no podrás editarla.",
+                    style = BuddyType.Subhead, color = BuddyColor.InkMuted,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showPublishConfirm = false; publishSelectedTrip() }) {
+                    Text("Publicar", color = BuddyColor.Brand, style = BuddyType.FootnoteBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPublishConfirm = false }) {
+                    Text("Cancelar", color = BuddyColor.InkMuted, style = BuddyType.FootnoteBold)
+                }
+            },
+        )
+    }
+
+    // "Tu portada está en blanco" — misma copy que iOS
+    if (showBlankAlert) {
+        AlertDialog(
+            onDismissRequest = { showBlankAlert = false },
+            containerColor = BuddyColor.Surface,
+            title = { Text("Tu portada está en blanco", style = BuddyType.Headline, color = BuddyColor.Ink) },
+            text = {
+                Text(
+                    "Agrega al menos una foto a tu portada antes de publicar tu trip.",
+                    style = BuddyType.Subhead, color = BuddyColor.InkMuted,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showBlankAlert = false }) {
+                    Text("Entendido", color = BuddyColor.Brand, style = BuddyType.FootnoteBold)
+                }
+            },
+        )
+    }
+
+    // Sheet de identidad — espejo de IdentitySheet(purpose: .publish) en iOS
+    if (showLoginSheet) {
+        com.buddy.app.core.designsystem.components.BuddySheet(onDismiss = { showLoginSheet = false }) {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = Spacing.edge, vertical = Spacing.lg),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(Spacing.md),
+            ) {
+                Text("Publica tu historia", style = BuddyType.Title3, color = BuddyColor.Ink)
+                Text(
+                    "Crea tu perfil para que la comunidad sepa quién comparte esta historia.",
+                    style = BuddyType.Subhead, color = BuddyColor.InkMuted,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(50.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(BuddyColor.Canvas)
+                        .border(1.dp, BuddyColor.Border, RoundedCornerShape(50))
+                        .clickable(enabled = !isSigningIn) { sessionVm.signInWithGoogle(context) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isSigningIn) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            Modifier.size(18.dp), color = BuddyColor.Ink, strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Text("Continuar con Google", style = BuddyType.FootnoteBold, color = BuddyColor.Ink)
+                    }
+                }
+                if (signInError != null) {
+                    Text(
+                        signInError!!, style = BuddyType.Caption1, color = BuddyColor.ErrorRed,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
+                Spacer(Modifier.height(Spacing.sm))
+            }
+        }
     }
 }
 

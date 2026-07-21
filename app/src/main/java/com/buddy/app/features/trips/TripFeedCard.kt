@@ -20,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,9 +34,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.layout.ContentScale
@@ -63,14 +76,72 @@ fun TripFeedCard(
     journey: ApiJourney,
     buddyName: String? = null,
     buddyAvatarUrl: String? = null,
-    onEdit: () -> Unit,
+    /** Espejo de iOS onEdit(Int): -1 = nuevo momento; índice = editar esa página. */
+    onEdit: (Int) -> Unit,
     onBuddyTap: () -> Unit,
+    /** Tap en el logo/nombre del header → pantalla del mapa (como iOS). */
+    onMapTap: (() -> Unit)? = null,
+    /** Tap en "Publicar esta historia" — el gate de login vive en el caller. */
+    onPublishTap: (() -> Unit)? = null,
+    isPublishing: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val destName = journey.destination?.name ?: journey.title ?: "Trip"
     val destCity = journey.destination?.city ?: ""
     val isCompleted = journey.status == "completed"
-    val pages = journey.pageThumbs.orEmpty()
+
+    // Portadas LOCALES del memoir — espejo de loadPages() + .memoirPageSaved
+    // (iOS): la card muestra los thumbnails generados al guardar el editor,
+    // no las URLs del backend (esas solo existen tras publicar).
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val persistence = remember {
+        com.buddy.app.features.trips.memoir.MemoirPersistence(context.applicationContext)
+    }
+    var pages by remember(journey.id) {
+        mutableStateOf<List<com.buddy.app.features.trips.memoir.CollagePage>>(emptyList())
+    }
+    androidx.compose.runtime.LaunchedEffect(journey.id, com.buddy.app.features.trips.memoir.MemoirEvents.saveTick) {
+        pages = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            persistence.load(journey.id)
+        }
+    }
+    // Eliminar portada — espejo de deleteTarget + deletePage(at:) en iOS
+    val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+    var deleteTarget by remember { mutableStateOf<Int?>(null) }
+    fun deletePageAt(index: Int) {
+        if (index !in pages.indices) return
+        val updated = pages.toMutableList().apply { removeAt(index) }
+        pages = updated
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            persistence.save(updated, journey.id)
+        }
+    }
+    // Confirmación "¿Eliminar esta portada?" — misma copy que iOS
+    deleteTarget?.let { target ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            containerColor = BuddyColor.Surface,
+            title = { Text("¿Eliminar esta portada?", style = BuddyType.Headline, color = BuddyColor.Ink) },
+            text = {
+                Text(
+                    "Las fotos de esta portada se quitarán del trip.",
+                    style = BuddyType.Subhead, color = BuddyColor.InkMuted,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { deletePageAt(target); deleteTarget = null }) {
+                    Text("Eliminar portada", color = BuddyColor.ErrorRed, style = BuddyType.FootnoteBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget = null }) {
+                    Text("Cancelar", color = BuddyColor.Brand, style = BuddyType.FootnoteBold)
+                }
+            },
+        )
+    }
     var showComoLlegar by remember { mutableStateOf(false) }
     val destLat = journey.destination?.lat
     val destLng = journey.destination?.lng
@@ -96,13 +167,35 @@ fun TripFeedCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            AsyncImage(
-                model = journey.destination?.coverUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.size(40.dp).clip(RoundedCornerShape(Radius.sm)),
-            )
-            Column(Modifier.weight(1f)) {
+            // Logo/nombre → mapa (como el Button(onMapTap) de iOS); sin cover
+            // del lugar cae al logo de la app (Image("AppIconImage") en iOS).
+            val headerTap = if (onMapTap != null) {
+                Modifier.clickable(onClick = onMapTap)
+            } else Modifier
+            if (journey.destination?.coverUrl.isNullOrEmpty()) {
+                androidx.compose.foundation.Image(
+                    painter = androidx.compose.ui.res.painterResource(com.buddy.app.R.drawable.splash_logo),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(Radius.sm))
+                        .background(BuddyColor.SurfaceRaised)
+                        .then(headerTap),
+                )
+            } else {
+                AsyncImage(
+                    model = journey.destination?.coverUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    error = androidx.compose.ui.res.painterResource(com.buddy.app.R.drawable.splash_logo),
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(Radius.sm))
+                        .then(headerTap),
+                )
+            }
+            Column(Modifier.weight(1f).then(headerTap)) {
                 Text(destName, style = BuddyType.Headline, color = BuddyColor.Ink)
                 if (destCity.isNotEmpty() && destCity != destName) {
                     Text(destCity, style = BuddyType.Caption1, color = BuddyColor.InkMuted)
@@ -131,19 +224,27 @@ fun TripFeedCard(
 
         // ── Canvas de momentos ────────────────────────────────────────────
         if (pages.isEmpty()) {
-            EmptyCanvas(journey, destName, enabled = !isCompleted, onTap = onEdit)
+            EmptyCanvas(journey, destName, enabled = !isCompleted, onTap = { onEdit(-1) })
         } else {
             val pagerState = rememberPagerState(pageCount = { pages.size + if (isCompleted) 0 else 1 })
             HorizontalPager(state = pagerState, modifier = Modifier.fillMaxWidth()) { index ->
                 if (index < pages.size) {
-                    AsyncImage(
-                        model = pages[index],
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxWidth().aspectRatio(0.8f),
+                    LocalPageSlide(
+                        page = pages[index],
+                        journeyId = journey.id,
+                        journey = journey,
+                        persistence = persistence,
+                        enabled = !isCompleted,
+                        canDelete = pages.size > 1,
+                        onTap = { onEdit(index) },
+                        onNewMoment = { onEdit(-1) },
+                        onDeleteRequest = { deleteTarget = index },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(canvasAspect()),
                     )
                 } else {
-                    AddMomentSlide(journey, onTap = onEdit)
+                    AddMomentSlide(journey, onTap = { onEdit(-1) })
                 }
             }
             // Page dots
@@ -165,8 +266,49 @@ fun TripFeedCard(
             }
         }
 
-        // ── Fila del buddy (solo trip activo) ─────────────────────────────
-        if (journey.status == "active") {
+        // ── Publicar historia — acción primaria cuando hay contenido listo
+        // (espejo de "Publicar esta historia" en TripFeedCard de iOS)
+        val hasPublishableContent = pages.any { it.itemSnapshots.isNotEmpty() || it.backgroundImageFile != null }
+        if (journey.status == "active" && hasPublishableContent && onPublishTap != null) {
+            HorizontalDivider(color = BuddyColor.Border, modifier = Modifier.padding(start = Spacing.md))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = !isPublishing, onClick = onPublishTap)
+                    .padding(horizontal = Spacing.md, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+            ) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    if (isPublishing) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            Modifier.size(16.dp), color = BuddyColor.Brand, strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Text("Publicar esta historia", style = BuddyType.FootnoteBold, color = BuddyColor.Ink)
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Check, contentDescription = null,
+                            Modifier.size(10.dp), tint = BuddyColor.Brand,
+                        )
+                        Text("Tu historia está lista", style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+                    }
+                }
+                Icon(
+                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = BuddyColor.InkMuted.copy(alpha = 0.5f),
+                )
+            }
+        }
+
+        // ── Fila del buddy — SOLO con buddy asignado en trip activo ───────
+        // Sin match no hay a quién preguntarle la duda: la fila se oculta.
+        if (journey.status == "active" && buddyName != null) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -199,7 +341,9 @@ fun TripFeedCard(
 private fun StatusBadge(journey: ApiJourney) {
     val (label, color) = when (journey.status) {
         "active" -> {
-            val days = daysSince(journey.arrivalAt)
+            // Sin arrival_at (trips creados por matching/pioneer) el badge caía
+            // siempre en "Desde hoy" — usar created_at como respaldo real.
+            val days = daysSince(journey.arrivalAt ?: journey.createdAt)
             val text = when {
                 days == null || days <= 0 -> "Desde hoy"
                 days == 1 -> "Desde hace 1 día"
@@ -231,13 +375,90 @@ private fun StatusBadge(journey: ApiJourney) {
     }
 }
 
+/**
+ * Proporción del preview de portada = la del canvas del editor — espejo de
+ * previewHeight en TripsView.swift: el preview muestra EXACTAMENTE lo que se
+ * editó, sin recorte ni barras. El canvas es retrato (máx 390dp × 480, como
+ * iPhone), así que el preview siempre es más alto que ancho.
+ */
+@Composable
+private fun canvasAspect(): Float =
+    com.buddy.app.features.trips.memoir.MemoirPage.aspect(
+        androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.toFloat(),
+    )
+
+/**
+ * Slide de una portada local — espejo de TripPageThumbnailFeed (iOS):
+ * thumbnail SOLO si la página tiene contenido real; si no, fallback al
+ * cover del destino. Long-press → menú contextual como iOS:
+ * "Nuevo momento" y "Eliminar momento" (solo con más de una portada).
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun LocalPageSlide(
+    page: com.buddy.app.features.trips.memoir.CollagePage,
+    journeyId: String,
+    journey: ApiJourney,
+    persistence: com.buddy.app.features.trips.memoir.MemoirPersistence,
+    enabled: Boolean,
+    canDelete: Boolean,
+    onTap: () -> Unit,
+    onNewMoment: () -> Unit,
+    onDeleteRequest: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var showMenu by remember { mutableStateOf(false) }
+    val thumbnail by androidx.compose.runtime.produceState<android.graphics.Bitmap?>(
+        null, page.id, page.editVersion,
+    ) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            if (page.itemSnapshots.isNotEmpty()) {
+                page.thumbnailFileName?.let { persistence.loadThumbnail(it, journeyId) }
+            } else null
+        }
+    }
+    Box(
+        modifier.combinedClickable(
+            enabled = enabled,
+            onClick = onTap,
+            onLongClick = { showMenu = true },
+        ),
+    ) {
+        val thumb = thumbnail
+        if (thumb != null) {
+            androidx.compose.foundation.Image(
+                bitmap = thumb.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            CoverBackground(journey)
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.25f)))
+        }
+        // Menú contextual — espejo del .contextMenu de iOS
+        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            DropdownMenuItem(
+                text = { Text("Nuevo momento", style = BuddyType.Body, color = BuddyColor.Ink) },
+                onClick = { showMenu = false; onNewMoment() },
+            )
+            if (canDelete) {
+                DropdownMenuItem(
+                    text = { Text("Eliminar momento", style = BuddyType.Body, color = BuddyColor.ErrorRed) },
+                    onClick = { showMenu = false; onDeleteRequest() },
+                )
+            }
+        }
+    }
+}
+
 // ── Empty canvas — "Tu historia empieza aquí" ──────────────────────────────
 @Composable
 private fun EmptyCanvas(journey: ApiJourney, destName: String, enabled: Boolean, onTap: () -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
-            .aspectRatio(0.8f)
+            .aspectRatio(canvasAspect())
             .clickable(enabled = enabled, onClick = onTap),
     ) {
         CoverBackground(journey)
@@ -264,7 +485,7 @@ private fun EmptyCanvas(journey: ApiJourney, destName: String, enabled: Boolean,
 // ── Slide final "Agregar otro momento" ─────────────────────────────────────
 @Composable
 private fun AddMomentSlide(journey: ApiJourney, onTap: () -> Unit) {
-    Box(Modifier.fillMaxWidth().aspectRatio(0.8f).clickable(onClick = onTap)) {
+    Box(Modifier.fillMaxWidth().aspectRatio(canvasAspect()).clickable(onClick = onTap)) {
         CoverBackground(journey)
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.4f)))
         Column(

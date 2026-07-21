@@ -74,13 +74,18 @@ class SessionStore @Inject constructor(@ApplicationContext private val context: 
         }
     }
 
-    /** Hydrate tras auth social/OTP — espejo de TravelerService.hydrate(). */
-    suspend fun hydrate(travelerId: String, token: String, status: String, fullName: String? = null) {
+    /**
+     * Hydrate tras auth social/OTP — espejo de TravelerService.hydrate() (iOS).
+     * Con secret: el verified renueva en silencio vía /travelers/refresh y la
+     * sesión persiste indefinidamente. Sin secret (backend antiguo): se borra el
+     * del guest anterior para no usarlo contra el nuevo traveler_id.
+     */
+    suspend fun hydrate(travelerId: String, token: String, status: String, fullName: String? = null, secret: String? = null) {
         context.sessionDataStore.edit {
             it[Keys.TravelerId] = travelerId
             it[Keys.Token] = token
             it[Keys.Status] = status
-            it.remove(Keys.Secret)   // verified users no usan secret (como iOS)
+            if (secret != null) it[Keys.Secret] = secret else it.remove(Keys.Secret)
             if (fullName != null) it[Keys.FullName] = fullName
         }
     }

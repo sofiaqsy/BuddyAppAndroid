@@ -66,4 +66,9 @@ object NetworkModule {
     @Singleton
     fun provideProfileApi(retrofit: Retrofit): com.buddy.app.features.profile.data.ProfileApi =
         retrofit.create(com.buddy.app.features.profile.data.ProfileApi::class.java)
+
+    @Provides
+    @Singleton
+    fun provideNotificationsApi(retrofit: Retrofit): com.buddy.app.core.data.NotificationsApi =
+        retrofit.create(com.buddy.app.core.data.NotificationsApi::class.java)
 }
