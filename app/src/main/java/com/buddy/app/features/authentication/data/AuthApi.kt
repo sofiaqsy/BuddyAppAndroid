@@ -23,7 +23,18 @@ interface AuthApi {
 
     @PATCH("travelers/profile")
     suspend fun completeProfile(@Body body: ProfileRequest)
+
+    /** Cierre de sesión server-side: revoca la sesión del dispositivo, borra su
+     *  push token y saca al buddy del pool de disponibles. */
+    @POST("travelers/logout")
+    suspend fun logout(@Body body: LogoutRequest)
 }
+
+@Serializable
+data class LogoutRequest(
+    @SerialName("device_id") val deviceId: String,
+    @SerialName("push_token") val pushToken: String? = null,
+)
 
 @Serializable
 data class InitRequest(@SerialName("device_id") val deviceId: String)

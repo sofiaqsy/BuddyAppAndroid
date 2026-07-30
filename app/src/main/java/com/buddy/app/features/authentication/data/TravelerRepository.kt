@@ -100,6 +100,25 @@ class TravelerRepository @Inject constructor(
         runCatching { forceRefresh(current) }.getOrNull()
     }
 
+    /**
+     * Avisa al servidor que este dispositivo cerró sesión — hay que llamarlo
+     * ANTES de limpiar el store, porque el interceptor necesita el JWT vigente.
+     *
+     * Sin esto el logout era solo local: la cuenta quedaba con
+     * `is_available = true` y el waterfall la seguía eligiendo como buddy
+     * aunque no hubiera nadie dentro de la app.
+     *
+     * Best-effort: si falla, el logout local sigue adelante igual.
+     */
+    suspend fun logoutRemote(pushToken: String?) {
+        try {
+            api.logout(LogoutRequest(deviceId = store.deviceId(), pushToken = pushToken))
+            Log.d(TAG, "logout server-side ✓")
+        } catch (e: Exception) {
+            Log.w(TAG, "logout server-side falló: ${e.message}")
+        }
+    }
+
     suspend fun clearSession() = store.clear()
 
     companion object { private const val TAG = "TravelerRepo" }
