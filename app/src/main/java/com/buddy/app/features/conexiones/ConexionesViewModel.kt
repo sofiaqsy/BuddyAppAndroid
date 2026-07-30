@@ -143,6 +143,13 @@ class ConexionesViewModel @Inject constructor(
         /** Ancla para que las tarjetas cuenten hacia atrás sin repreguntar. */
         val availableHelpFetchedAtMs: Long = 0L,
         val acceptingHelpId: String? = null,
+        /**
+         * ¿Este usuario es buddy aprobado? Lo dice el propio endpoint de
+         * oportunidades — responde 403 a quien no lo es —, así que no hace
+         * falta una petición extra a /buddy/me para decidir si mostrar la
+         * sección.
+         */
+        val isApprovedBuddy: Boolean = false,
         /** requestId → mensaje, cuando aceptar falló (ya tomada, o aún bloqueada). */
         val helpError: Pair<String, String>? = null,
         /** Match recién aceptado → abrir su chat de inmediato (como iOS). */
@@ -171,8 +178,12 @@ class ConexionesViewModel @Inject constructor(
                 return availableHelpPool.filter { it.id !in mine }.take(3)
             }
 
+        /**
+         * Un buddy aprobado nunca está "vacío": su sección de oportunidades es
+         * fija y tiene que estar ahí aunque hoy no haya a quién ayudar.
+         */
         val isEmpty: Boolean
-            get() = connections.isEmpty() && offers.isEmpty() && availableHelp.isEmpty()
+            get() = !isApprovedBuddy && connections.isEmpty() && offers.isEmpty()
     }
 
     private val _state = MutableStateFlow(State())
@@ -226,13 +237,22 @@ class ConexionesViewModel @Inject constructor(
                     }.awaitAll()
                 }.sortedByDescending { it.lastMessage?.createdAt ?: "" }
                 val offers = runCatching { repo.myOffers() }.getOrDefault(emptyList())
-                val available = runCatching { repo.availableHelp() }.getOrDefault(emptyList())
+                val available = runCatching { repo.availableHelp() }
+                // Solo un 403 explícito dice que este usuario no es buddy
+                // aprobado; ante cualquier otro fallo se conserva lo que ya
+                // sabíamos, para no esconder la sección por un corte de red.
+                val isBuddy = when {
+                    available.isSuccess -> true
+                    (available.exceptionOrNull() as? HttpException)?.code() == 403 -> false
+                    else -> _state.value.isApprovedBuddy
+                }
                 _state.update { s ->
                     s.copy(
                         hasLoadedOnce = true,
                         connections = items,
                         offers = offers,
-                        availableHelpPool = sortAvailable(available),
+                        isApprovedBuddy = isBuddy,
+                        availableHelpPool = sortAvailable(available.getOrDefault(emptyList())),
                         availableHelpFetchedAtMs = System.currentTimeMillis(),
                         totalUnread = items.count {
                             it.match.status in listOf("pending", "accepted", "active") && it.pendingReply
@@ -262,10 +282,15 @@ class ConexionesViewModel @Inject constructor(
     /** Recarga ligera: solo esta lista, no matches ni mensajes. */
     fun refreshAvailableHelp() {
         viewModelScope.launch {
-            val fetched = runCatching { repo.availableHelp() }.getOrNull() ?: return@launch
+            val result = runCatching { repo.availableHelp() }
+            val notBuddy = (result.exceptionOrNull() as? HttpException)?.code() == 403
+            // Un fallo de red no debe esconder la sección: solo un 403 explícito
+            // dice que este usuario no es buddy aprobado.
+            if (result.isFailure && !notBuddy) return@launch
             _state.update {
                 it.copy(
-                    availableHelpPool = sortAvailable(fetched),
+                    isApprovedBuddy = !notBuddy,
+                    availableHelpPool = sortAvailable(result.getOrDefault(emptyList())),
                     availableHelpFetchedAtMs = System.currentTimeMillis(),
                 )
             }

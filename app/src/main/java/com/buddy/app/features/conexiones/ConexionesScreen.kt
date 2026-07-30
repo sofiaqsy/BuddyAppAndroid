@@ -271,7 +271,8 @@ private fun ConnectionList(
 ) {
     Column(Modifier.verticalScroll(rememberScrollState())) {
         // ── ASIGNADAS PARA TI — solicitudes pendientes para este buddy ─────
-        run {
+        // A demanda: solo aparece cuando el matching te eligió.
+        if (state.offers.isNotEmpty()) {
             ListHeader("ASIGNADAS PARA TI", state.offers.size, BuddyColor.Brand)
             Column(
                 Modifier.padding(horizontal = Spacing.edge),
@@ -292,7 +293,10 @@ private fun ConnectionList(
         // ── OPORTUNIDADES PARA AYUDAR — respaldo comunitario: solicitudes
         // de otros buddies que, si no responden a tiempo, cualquiera puede
         // tomar. Nunca incluye la oferta oficial propia: esa ya está arriba.
-        run {
+        // Fija para buddies aprobados: es la puerta al respaldo comunitario,
+        // y si solo apareciera cuando hay algo, nadie sabría que existe. A un
+        // viajero que no es buddy no le dice nada, así que a ese no se muestra.
+        if (state.isApprovedBuddy) {
             ListHeader("OPORTUNIDADES PARA AYUDAR", state.availableHelp.size, BuddyColor.Accent)
             Column(
                 Modifier.padding(horizontal = Spacing.edge),
@@ -312,7 +316,9 @@ private fun ConnectionList(
 
         // ── ACOMPAÑAMIENTO ABIERTO — toda conversación viva, ayude yo o me
         // ayuden. La fila ya dice con quién y desde dónde.
-        ActiveSection("ACOMPAÑAMIENTO ABIERTO", state.active, BuddyColor.Accent, onOpen)
+        if (state.active.isNotEmpty()) {
+            ActiveSection("ACOMPAÑAMIENTO ABIERTO", state.active, BuddyColor.Accent, onOpen)
+        }
 
         // ── ENCUENTROS ANTERIORES — filas planas, sin cajas ───────────────
         run {
