@@ -209,7 +209,10 @@ class ConexionesViewModel @Inject constructor(
         viewModelScope.launch {
             while (true) {
                 delay(20_000)
-                refreshAvailableHelp()
+                // Sin aprobación el endpoint responde 403 — no tiene sentido
+                // preguntarlo cada 20s de por vida. Cuando la aprobación llega,
+                // isApprovedBuddy lo actualizan load() y el push buddy_approved.
+                if (_state.value.isApprovedBuddy) refreshAvailableHelp()
             }
         }
     }

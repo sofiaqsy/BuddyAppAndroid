@@ -15,6 +15,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Instant
@@ -82,7 +83,9 @@ class HomeViewModel @Inject constructor(
     private var realtimeRefreshJob: kotlinx.coroutines.Job? = null
     private fun observeRealtime() {
         viewModelScope.launch {
-            sse.events("stream").collect {
+            // request_closed es de la lista "Oportunidades para ayudar" en
+            // Conexiones; aquí no cambia nada y solo provocaba un refresh de más.
+            sse.events("stream").filter { it.event != "request_closed" }.collect {
                 realtimeRefreshJob?.cancel()
                 realtimeRefreshJob = viewModelScope.launch {
                     kotlinx.coroutines.delay(800)

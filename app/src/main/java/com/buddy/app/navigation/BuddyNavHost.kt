@@ -27,6 +27,8 @@ import com.buddy.app.features.trips.TripsScreen
 @Composable
 fun BuddyRoot() {
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.Inicio) }
+    // Conserva el estado de cada tab mientras no está en pantalla.
+    val tabStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     // Tap en notificación push (ej. "buddy_approved") — ver PendingTabNavigation.
     val pendingTab by PendingTabNavigation.target.collectAsState()
     LaunchedEffect(pendingTab) {
@@ -117,6 +119,12 @@ fun BuddyRoot() {
         },
     ) { padding ->
         val modifier = Modifier.padding(padding)
+        // `when` descompone el tab que dejas, y con él se pierde todo el estado
+        // local: posición de scroll, sheets, campos a medio llenar. Los datos
+        // seguían en el ViewModel (scope de Activity), pero la lista volvía
+        // arriba y se sentía como si recargara. SaveableStateProvider guarda y
+        // restaura ese estado por tab, que es lo que hace el TabView de iOS.
+        tabStateHolder.SaveableStateProvider(selectedTab) {
         when (selectedTab) {
             AppTab.Inicio -> InicioScreen(
                 modifier,
@@ -136,6 +144,7 @@ fun BuddyRoot() {
             )
             AppTab.Conexiones -> ConexionesScreen(modifier, onOpenTrips = { selectedTab = AppTab.Trips })
             AppTab.Yo -> YoScreen(modifier, onOpenTrips = { selectedTab = AppTab.Trips })
+        }
         }
     }
 }

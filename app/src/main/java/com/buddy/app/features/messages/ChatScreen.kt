@@ -614,7 +614,10 @@ fun ChatScreen(
         AlertDialog(
             onDismissRequest = { showCloseConfirm = false },
             title = { Text("¿Cerrar acompañamiento?") },
-            text = { Text("$buddyName quedará libre para acompañar a otro viajero.") },
+            // Este diálogo lo ve el buddy, así que `buddyName` es el viajero:
+            // el texto va en segunda persona, sobre lo que deja de hacer QUIEN
+            // cierra. Con la redacción del viajero quedaba al revés.
+            text = { Text("Dejarás de acompañar a $buddyName. Podrás recibir nuevas solicitudes.") },
             confirmButton = {
                 TextButton(onClick = { showCloseConfirm = false; viewModel.closeAsHelper() }) {
                     Text("Cerrar", color = BuddyColor.ErrorRed)
@@ -1216,7 +1219,7 @@ private fun CloseCycleCard(
 ) {
     val title = if (isHelper) "¿Pudiste ayudar a $buddyName?" else "¿pudimos cerrar tu duda?"
     val subtitle = if (isHelper)
-        "Si ya resolviste su duda, cierra el apoyo para quedar libre y acompañar a otro viajero."
+        "Si ya resolviste su duda, cierra el apoyo. Podrás recibir nuevas solicitudes."
     else
         "Si todo está resuelto, cierra la ayuda para que $buddyName pueda apoyar a otro viajero."
     val closeLabel = if (isHelper) "Sí, resuelto" else "Sí, gracias"

@@ -2,12 +2,16 @@ package com.buddy.app.core.network
 
 import android.util.Log
 import com.buddy.app.BuildConfig
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
@@ -33,12 +37,32 @@ class SseClient @Inject constructor(
         baseClient.newBuilder().readTimeout(0, TimeUnit.SECONDS).build()
     }
 
+    private val shareScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val streams = mutableMapOf<String, Flow<SseEvent>>()
+
+    /**
+     * Una sola conexión por `path`, compartida entre todos los colectores.
+     *
+     * Antes cada colector abría la suya: Home, Tu trip y Conexiones escuchan
+     * los tres el stream global, o sea tres conexiones HTTP permanentes a
+     * /stream por dispositivo haciendo exactamente el mismo trabajo.
+     *
+     * WhileSubscribed con 5s de gracia: al cambiar de tab la conexión no se
+     * cierra y se vuelve a abrir enseguida, que era el otro origen del
+     * parpadeo de recarga.
+     */
+    fun events(path: String): Flow<SseEvent> = synchronized(streams) {
+        streams.getOrPut(path) {
+            connect(path).shareIn(shareScope, SharingStarted.WhileSubscribed(5_000), replay = 0)
+        }
+    }
+
     /**
      * Conecta a `path` (relativo a la base) y emite eventos. Reconecta solo
      * con backoff 1s→2s→4s… máx 30s, reiniciando tras conexión exitosa.
      * El AuthInterceptor del cliente base adjunta el Bearer automáticamente.
      */
-    fun events(path: String): Flow<SseEvent> = callbackFlow {
+    private fun connect(path: String): Flow<SseEvent> = callbackFlow {
         val job = launch {
             var attempt = 0
             while (isActive) {

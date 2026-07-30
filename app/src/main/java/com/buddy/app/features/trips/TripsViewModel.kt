@@ -14,6 +14,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -69,7 +70,10 @@ class TripsViewModel @Inject constructor(
     private var realtimeJob: Job? = null
     private fun observeRealtime() {
         viewModelScope.launch {
-            sse.events("stream").collect {
+            // Solo eventos de match: aquí lo único que depende del stream es la
+            // fila "¿Una duda en X?". Antes recargaba journeys + matches con
+            // CADA mensaje de chat, que es el evento más frecuente de todos.
+            sse.events("stream").filter { it.event == null || it.event == "match" }.collect {
                 realtimeJob?.cancel()
                 realtimeJob = viewModelScope.launch {
                     delay(800)
