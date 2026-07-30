@@ -64,6 +64,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.buddy.app.core.data.model.ApiJourney
 import com.buddy.app.core.data.model.ApiPlaceContext
+import com.buddy.app.core.TravelerAlias
 import com.buddy.app.core.designsystem.BuddyColor
 import com.buddy.app.core.designsystem.BuddyType
 import com.buddy.app.core.designsystem.Radius
@@ -598,7 +599,7 @@ private fun CommunitySection(
 private fun PublishedTripCard(story: ApiJourney, modifier: Modifier = Modifier) {
     val thumbs = story.pageThumbs.orEmpty().ifEmpty { listOfNotNull(story.coverUrl) }
     val destName = story.destination?.name ?: story.title ?: ""
-    val authorName = story.users?.fullName ?: "Viajero"
+    val authorName = TravelerAlias.displayName(story.users?.fullName, story.users?.id)
 
     Column(
         modifier
@@ -727,7 +728,7 @@ private fun MatchingSheet(
                 is MatchingViewModel.SearchState.Matched -> {
                     BuddyAvatar(imageUrl = searchState.buddy?.avatarUrl, name = searchState.buddy?.fullName, size = 64.dp)
                     Text(
-                        "¡${searchState.buddy?.fullName ?: "Tu buddy"} está listo para ayudarte!",
+                        "¡${TravelerAlias.displayName(searchState.buddy?.fullName, searchState.buddy?.id)} está listo para ayudarte!",
                         style = BuddyType.Title3, color = BuddyColor.Ink,
                     )
                     BuddyPrimaryButton("Ir a la conversación", onClick = {

@@ -124,6 +124,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.buddy.app.core.TravelerAlias
 import com.buddy.app.core.designsystem.BuddyColor
 import com.buddy.app.core.designsystem.BuddyType
 import com.buddy.app.core.designsystem.Radius
@@ -173,12 +174,19 @@ fun ChatScreen(
     val match = state.match
     val isCurrentUserBuddy = state.myTravelerId != null && state.myTravelerId == match?.buddyId
     val otherPerson = if (isCurrentUserBuddy) match?.traveler else match?.buddy
-    val buddyName = otherPerson?.fullName?.split(" ")?.firstOrNull()?.lowercase()
-        ?: title.split(" ").firstOrNull()?.lowercase()
-        ?: if (isCurrentUserBuddy) "viajero" else "buddy"
+    val otherPersonId = otherPerson?.id
+        ?: if (isCurrentUserBuddy) match?.travelerId else match?.buddyId
+    // El nombre real va en minúscula, como el resto del encabezado. El alias no:
+    // "Tortuga Azul" funciona como nombre propio y en minúscula se lee como una
+    // cosa, no como alguien.
+    val realName = otherPerson?.fullName?.trim().orEmpty()
+    val buddyName = if (realName.isNotEmpty()) {
+        realName.split(" ").firstOrNull()?.lowercase() ?: realName
+    } else {
+        TravelerAlias.alias(otherPersonId)
+    }
     val buddyAvatarUrl = otherPerson?.avatarUrl
-    val buddyInitials = (otherPerson?.fullName ?: title).split(" ")
-        .take(2).mapNotNull { it.firstOrNull()?.toString() }.joinToString("")
+    val buddyInitials = TravelerAlias.initials(otherPerson?.fullName, otherPersonId)
 
     // ── UI state ──────────────────────────────────────────────────────────────
     var showMenu by remember { mutableStateOf(false) }

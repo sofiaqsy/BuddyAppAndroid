@@ -3,6 +3,7 @@ package com.buddy.app.features.conexiones
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.buddy.app.core.TravelerAlias
 import com.buddy.app.core.data.SessionStore
 import com.buddy.app.core.network.SseClient
 import com.buddy.app.features.matching.data.ApiBuddyOffer
@@ -48,9 +49,11 @@ data class ConnectionItem(
     val isBuddyRole: Boolean get() = myTravelerId != null && match.buddyId == myTravelerId
 
     val displayName: String
-        get() = (if (isBuddyRole) match.traveler?.fullName else match.buddy?.fullName)
-            ?.split(" ")?.firstOrNull()?.replaceFirstChar { it.uppercase() }
-            ?: if (isBuddyRole) "Viajero" else "Buddy"
+        get() = if (isBuddyRole) {
+            TravelerAlias.shortDisplayName(match.traveler?.fullName, match.traveler?.id ?: match.travelerId)
+        } else {
+            TravelerAlias.shortDisplayName(match.buddy?.fullName, match.buddy?.id ?: match.buddyId)
+        }
 
     val avatarUrl: String? get() = if (isBuddyRole) match.traveler?.avatarUrl else match.buddy?.avatarUrl
 

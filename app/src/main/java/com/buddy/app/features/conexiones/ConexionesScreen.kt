@@ -47,6 +47,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.buddy.app.core.TravelerAlias
 import com.buddy.app.core.designsystem.BuddyColor
 import com.buddy.app.core.designsystem.BuddyType
 import com.buddy.app.core.designsystem.Radius
@@ -375,8 +376,12 @@ private fun OfferCard(
     onAccept: () -> Unit,
     onDecline: () -> Unit,
 ) {
-    val travelerName = offer.helpRequest?.users?.fullName?.split(" ")?.firstOrNull()
-        ?.replaceFirstChar { it.uppercase() } ?: "Viajero"
+    val travelerName = TravelerAlias.shortDisplayName(
+        offer.helpRequest?.users?.fullName, offer.helpRequest?.users?.id
+    )
+    val travelerInitials = TravelerAlias.initials(
+        offer.helpRequest?.users?.fullName, offer.helpRequest?.users?.id
+    )
     val category = offer.helpRequest?.category.orEmpty()
     val categoryLabel = CATEGORY_LABELS[category] ?: category.replaceFirstChar { it.uppercase() }
     val destinationName = offer.helpRequest?.destination?.name.orEmpty()
@@ -400,8 +405,8 @@ private fun OfferCard(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    travelerName.take(1),
-                    style = BuddyType.Headline.copy(fontWeight = FontWeight.Bold),
+                    travelerInitials,
+                    style = BuddyType.Subhead.copy(fontWeight = FontWeight.Bold),
                     color = BuddyColor.Brand,
                 )
             }
