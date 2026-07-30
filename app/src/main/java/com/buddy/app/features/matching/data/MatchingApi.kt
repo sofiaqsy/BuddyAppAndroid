@@ -38,6 +38,10 @@ interface MatchingApi {
     @GET("matching/my-offers")
     suspend fun myOffers(): List<ApiBuddyOffer>
 
+    /** Solicitudes activas dentro de la cobertura del buddy (respaldo comunitario). */
+    @GET("matching/requests/for-buddy")
+    suspend fun requestsForBuddy(): List<ApiHelpRequest>
+
     @POST("matching/match")
     suspend fun acceptRequest(@Body body: AcceptBody): ApiMatch
 
@@ -125,6 +129,16 @@ data class ApiHelpRequest(
     val category: String,
     val description: String? = null,
     @SerialName("is_active") val isActive: Boolean = true,
+    val users: ApiUserRef? = null,
+    val destination: ApiDestinationRef? = null,
+    // Solo presentes en GET /matching/requests/for-buddy — metadata de
+    // "Oportunidades para ayudar" (respaldo comunitario con ventana de
+    // exclusividad para el candidato oficial).
+    @SerialName("candidate_count") val candidateCount: Int? = null,
+    @SerialName("is_priority_for_me") val isPriorityForMe: Boolean? = null,
+    @SerialName("is_community_unlocked") val isCommunityUnlocked: Boolean? = null,
+    @SerialName("community_unlocks_in") val communityUnlocksIn: Int? = null,
+    @SerialName("offer_seconds_remaining") val offerSecondsRemaining: Int? = null,
 )
 
 @Serializable

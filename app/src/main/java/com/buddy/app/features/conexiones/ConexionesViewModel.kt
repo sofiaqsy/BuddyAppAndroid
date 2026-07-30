@@ -7,6 +7,7 @@ import com.buddy.app.core.TravelerAlias
 import com.buddy.app.core.data.SessionStore
 import com.buddy.app.core.network.SseClient
 import com.buddy.app.features.matching.data.ApiBuddyOffer
+import com.buddy.app.features.matching.data.ApiHelpRequest
 import com.buddy.app.features.matching.data.ApiMatch
 import com.buddy.app.features.matching.data.ApiMessage
 import com.buddy.app.features.matching.data.MatchingRepository
@@ -19,7 +20,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import retrofit2.HttpException
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
@@ -128,6 +134,17 @@ class ConexionesViewModel @Inject constructor(
         val totalUnread: Int = 0,
         val acceptingOfferId: String? = null,
         val decliningOfferId: String? = null,
+        /**
+         * Solicitudes en la cobertura que NO eran la oferta oficial de este
+         * buddy cuando se consultó al servidor. Sin topar — el tope se aplica
+         * en [availableHelp], tras descartar las que ya subieron a [offers].
+         */
+        val availableHelpPool: List<ApiHelpRequest> = emptyList(),
+        /** Ancla para que las tarjetas cuenten hacia atrás sin repreguntar. */
+        val availableHelpFetchedAtMs: Long = 0L,
+        val acceptingHelpId: String? = null,
+        /** requestId → mensaje, cuando aceptar falló (ya tomada, o aún bloqueada). */
+        val helpError: Pair<String, String>? = null,
         /** Match recién aceptado → abrir su chat de inmediato (como iOS). */
         val openMatch: ApiMatch? = null,
     ) {
@@ -138,7 +155,22 @@ class ConexionesViewModel @Inject constructor(
         val activeAsTraveler: List<ConnectionItem> get() = active.filter { !it.isBuddyRole }
         /** ENCUENTROS ANTERIORES. */
         val past: List<ConnectionItem> get() = connections.filter { it.match.status == "completed" }
-        val isEmpty: Boolean get() = connections.isEmpty() && offers.isEmpty()
+
+        /**
+         * OPORTUNIDADES PARA AYUDAR. Se deriva en vez de almacenarse para que
+         * una solicitud NUNCA salga en dos secciones a la vez: si el matching
+         * escaló hacia este buddy y ya es su oferta oficial, desaparece de aquí
+         * en el mismo instante, sin depender de que ambas listas se hayan
+         * refrescado en el mismo ciclo.
+         */
+        val availableHelp: List<ApiHelpRequest>
+            get() {
+                val mine = offers.flatMap { listOfNotNull(it.requestId, it.helpRequest?.id) }.toSet()
+                return availableHelpPool.filter { it.id !in mine }.take(3)
+            }
+
+        val isEmpty: Boolean
+            get() = connections.isEmpty() && offers.isEmpty() && availableHelp.isEmpty()
     }
 
     private val _state = MutableStateFlow(State())
@@ -146,7 +178,27 @@ class ConexionesViewModel @Inject constructor(
 
     init {
         load()
-        viewModelScope.launch { sse.events("stream").collect { load() } }
+        viewModelScope.launch {
+            sse.events("stream").collect { ev ->
+                // El viajero canceló, o ya la tomó otro buddy: la tarjeta se
+                // retira al instante y sin red. Seguir ofreciendo ayuda que ya
+                // no existe es peor que esperar, porque el buddy toca y se
+                // lleva un error.
+                val closedId = if (ev.event == "request_closed") {
+                    runCatching { sseJson.decodeFromString<RequestClosed>(ev.data).requestId }.getOrNull()
+                } else null
+                if (closedId != null) removeAvailableHelp(closedId) else load()
+            }
+        }
+        // "Oportunidades para ayudar" no tiene canal push propio (a diferencia
+        // de las ofertas oficiales, que llegan por notificación), así que se
+        // refresca sola mientras la pantalla vive.
+        viewModelScope.launch {
+            while (true) {
+                delay(20_000)
+                refreshAvailableHelp()
+            }
+        }
     }
 
     fun load() {
@@ -172,11 +224,14 @@ class ConexionesViewModel @Inject constructor(
                     }.awaitAll()
                 }.sortedByDescending { it.lastMessage?.createdAt ?: "" }
                 val offers = runCatching { repo.myOffers() }.getOrDefault(emptyList())
+                val available = runCatching { repo.availableHelp() }.getOrDefault(emptyList())
                 _state.update { s ->
                     s.copy(
                         hasLoadedOnce = true,
                         connections = items,
                         offers = offers,
+                        availableHelpPool = sortAvailable(available),
+                        availableHelpFetchedAtMs = System.currentTimeMillis(),
                         totalUnread = items.count {
                             it.match.status in listOf("pending", "accepted", "active") && it.pendingReply
                         } + offers.size,
@@ -190,6 +245,63 @@ class ConexionesViewModel @Inject constructor(
     }
 
     /** Aceptar solicitud — al éxito abre el chat con el viajero (como iOS). */
+    /**
+     * Descarta la oferta oficial propia (ya vive en `offers`) y ordena las
+     * liberadas primero, luego por cercanía a liberarse.
+     */
+    private fun sortAvailable(fetched: List<ApiHelpRequest>): List<ApiHelpRequest> =
+        fetched
+            .filter { it.isActive && it.isPriorityForMe != true }
+            .sortedWith(
+                compareBy<ApiHelpRequest> { it.isCommunityUnlocked != true }
+                    .thenBy { it.communityUnlocksIn ?: 0 },
+            )
+
+    /** Recarga ligera: solo esta lista, no matches ni mensajes. */
+    fun refreshAvailableHelp() {
+        viewModelScope.launch {
+            val fetched = runCatching { repo.availableHelp() }.getOrNull() ?: return@launch
+            _state.update {
+                it.copy(
+                    availableHelpPool = sortAvailable(fetched),
+                    availableHelpFetchedAtMs = System.currentTimeMillis(),
+                )
+            }
+        }
+    }
+
+    private fun removeAvailableHelp(requestId: String) {
+        _state.update { s ->
+            if (s.availableHelpPool.none { it.id == requestId }) s
+            else s.copy(availableHelpPool = s.availableHelpPool.filterNot { it.id == requestId })
+        }
+    }
+
+    fun acceptAvailableHelp(item: ApiHelpRequest) {
+        if (_state.value.acceptingHelpId != null) return
+        _state.update { it.copy(acceptingHelpId = item.id, helpError = null) }
+        viewModelScope.launch {
+            runCatching { repo.acceptOffer(item.id) }
+                .onSuccess { match ->
+                    _state.update { it.copy(acceptingHelpId = null, openMatch = match) }
+                    load()
+                }
+                .onFailure { e ->
+                    // El servidor vuelve a validar la ventana de exclusividad y
+                    // la carrera entre buddies; el botón deshabilitado es solo
+                    // UX, no la barrera.
+                    val msg = when ((e as? HttpException)?.code()) {
+                        409 -> "Ya fue tomada"
+                        403 -> "Aún tiene prioridad otro buddy"
+                        else -> "No se pudo aceptar"
+                    }
+                    Log.w(TAG, "acceptAvailableHelp failed", e)
+                    _state.update { it.copy(acceptingHelpId = null, helpError = item.id to msg) }
+                    refreshAvailableHelp()
+                }
+        }
+    }
+
     fun acceptOffer(offer: ApiBuddyOffer) {
         val requestId = offer.helpRequest?.id ?: return
         if (_state.value.acceptingOfferId != null || _state.value.decliningOfferId != null) return
@@ -221,3 +333,8 @@ class ConexionesViewModel @Inject constructor(
 
     companion object { private const val TAG = "ConexionesVM" }
 }
+
+private val sseJson = Json { ignoreUnknownKeys = true }
+
+@Serializable
+private data class RequestClosed(@SerialName("request_id") val requestId: String? = null)

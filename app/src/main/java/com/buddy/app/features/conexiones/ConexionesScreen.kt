@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,7 +33,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -54,6 +58,7 @@ import com.buddy.app.core.designsystem.Radius
 import com.buddy.app.core.designsystem.Spacing
 import com.buddy.app.core.designsystem.components.BuddyAvatar
 import com.buddy.app.features.matching.data.ApiBuddyOffer
+import com.buddy.app.features.matching.data.ApiHelpRequest
 import com.buddy.app.features.messages.ChatScreen
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -284,6 +289,27 @@ private fun ConnectionList(
             }
         }
 
+        // ── OPORTUNIDADES PARA AYUDAR — respaldo comunitario: solicitudes
+        // de otros buddies que, si no responden a tiempo, cualquiera puede
+        // tomar. Nunca incluye la oferta oficial propia: esa ya está arriba.
+        if (state.availableHelp.isNotEmpty()) {
+            ListHeader("OPORTUNIDADES PARA AYUDAR", state.availableHelp.size, BuddyColor.Accent)
+            Column(
+                Modifier.padding(horizontal = Spacing.edge),
+                verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+            ) {
+                state.availableHelp.forEach { item ->
+                    AvailableHelpCard(
+                        item = item,
+                        fetchedAtMs = state.availableHelpFetchedAtMs,
+                        isAccepting = state.acceptingHelpId == item.id,
+                        error = state.helpError?.takeIf { it.first == item.id }?.second,
+                        onAccept = { viewModel.acceptAvailableHelp(item) },
+                    )
+                }
+            }
+        }
+
         // ── ACOMPAÑAMIENTO ABIERTO — viajeros a los que YO ayudo ───────────
         if (state.activeAsBuddy.isNotEmpty()) {
             ActiveSection("ACOMPAÑAMIENTO ABIERTO", state.activeAsBuddy, BuddyColor.Accent, onOpen)
@@ -357,6 +383,121 @@ private fun ListHeader(title: String, count: Int, color: Color) {
         Text(title, style = BuddyType.Eyebrow.copy(letterSpacing = 1.5.sp), color = color)
         if (count > 0) {
             Text("· $count", style = BuddyType.Eyebrow, color = BuddyColor.InkMuted.copy(alpha = 0.7f))
+        }
+    }
+}
+
+// ── Available Help Card — "OPORTUNIDADES PARA AYUDAR" ─────────────────────
+//
+// Muestra una solicitud que NO es la oferta oficial de este buddy. Durante los
+// primeros 30s desde que se creó la cola, el candidato oficial tiene prioridad
+// exclusiva: la tarjeta se ve pero el botón está deshabilitado con cuenta
+// regresiva. Pasada la ventana, cualquier buddy elegible puede tomarla — el
+// servidor vuelve a validarlo en POST /matching/match, así que esto es solo UX.
+@Composable
+private fun AvailableHelpCard(
+    item: ApiHelpRequest,
+    fetchedAtMs: Long,
+    isAccepting: Boolean,
+    error: String?,
+    onAccept: () -> Unit,
+) {
+    val travelerName = TravelerAlias.shortDisplayName(item.users?.fullName, item.users?.id ?: item.travelerId)
+    val travelerInitials = TravelerAlias.initials(item.users?.fullName, item.users?.id ?: item.travelerId)
+    val categoryLabel = CATEGORY_LABELS[item.category] ?: item.category.replaceFirstChar { it.uppercase() }
+    val destinationName = item.destination?.name.orEmpty()
+
+    // Reloj local de 1s: la cuenta regresiva avanza sin repreguntar al servidor.
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(item.id) {
+        while (true) {
+            kotlinx.coroutines.delay(1_000)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    val elapsedSec = if (fetchedAtMs == 0L) 0 else ((nowMs - fetchedAtMs) / 1000).toInt()
+    val unlocksIn = ((item.communityUnlocksIn ?: 0) - elapsedSec).coerceAtLeast(0)
+    val isUnlocked = (item.isCommunityUnlocked ?: true) && unlocksIn <= 0
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(Radius.lg))
+            .background(BuddyColor.Surface)
+            .border(1.dp, BuddyColor.Accent.copy(alpha = 0.2f), RoundedCornerShape(Radius.lg)),
+    ) {
+        Row(
+            Modifier.padding(Spacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(
+                Modifier.size(44.dp).background(BuddyColor.GroupedBg, CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    travelerInitials,
+                    style = BuddyType.Subhead.copy(fontWeight = FontWeight.Bold),
+                    color = BuddyColor.Accent,
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Text(travelerName, style = BuddyType.Headline, color = BuddyColor.Ink)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (destinationName.isNotEmpty()) {
+                        Text(destinationName, style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+                        Text("·", style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+                    }
+                    Text(categoryLabel, style = BuddyType.Caption1, color = BuddyColor.Accent)
+                }
+            }
+            item.candidateCount?.takeIf { it > 1 }?.let { count ->
+                Text(
+                    "$count buddies pueden atender",
+                    style = BuddyType.Caption1,
+                    color = BuddyColor.InkMuted,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.width(90.dp),
+                )
+            }
+        }
+
+        HorizontalDivider(Modifier.padding(horizontal = Spacing.md), color = BuddyColor.Hairline)
+
+        Row(
+            Modifier.padding(horizontal = Spacing.md, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                when {
+                    error != null -> error
+                    isUnlocked -> "Disponible ahora"
+                    else -> "Otro buddy tiene prioridad · ${unlocksIn}s"
+                },
+                style = BuddyType.Caption1,
+                color = when {
+                    error != null -> BuddyColor.ErrorRed
+                    isUnlocked -> BuddyColor.Accent
+                    else -> BuddyColor.InkMuted
+                },
+                modifier = Modifier.weight(1f),
+            )
+            Box(
+                Modifier
+                    .width(88.dp)
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (isUnlocked) BuddyColor.Accent else BuddyColor.InkMuted.copy(alpha = 0.3f))
+                    .clickable(enabled = isUnlocked && !isAccepting, onClick = onAccept),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (isAccepting) {
+                    CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                } else {
+                    Text("Ayudar", style = BuddyType.FootnoteBold, color = Color.White)
+                }
+            }
         }
     }
 }

@@ -49,6 +49,14 @@ class MatchingRepository @Inject constructor(
 
     suspend fun myOffers(): List<ApiBuddyOffer> = api.myOffers()
 
+    /**
+     * "Oportunidades para ayudar" — solicitudes dentro de la cobertura del
+     * buddy, incluida su propia oferta oficial (isPriorityForMe = true) y las
+     * que aún están en la ventana de exclusividad de otro buddy
+     * (isCommunityUnlocked = false).
+     */
+    suspend fun availableHelp(): List<ApiHelpRequest> = api.requestsForBuddy()
+
     suspend fun acceptOffer(requestId: String): ApiMatch = api.acceptRequest(AcceptBody(requestId))
 
     suspend fun declineOffer(requestId: String) = api.declineOffer(DeclineBody(requestId))
