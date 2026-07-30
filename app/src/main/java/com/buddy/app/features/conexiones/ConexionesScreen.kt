@@ -271,7 +271,7 @@ private fun ConnectionList(
 ) {
     Column(Modifier.verticalScroll(rememberScrollState())) {
         // ── ASIGNADAS PARA TI — solicitudes pendientes para este buddy ─────
-        if (state.offers.isNotEmpty()) {
+        run {
             ListHeader("ASIGNADAS PARA TI", state.offers.size, BuddyColor.Brand)
             Column(
                 Modifier.padding(horizontal = Spacing.edge),
@@ -292,7 +292,7 @@ private fun ConnectionList(
         // ── OPORTUNIDADES PARA AYUDAR — respaldo comunitario: solicitudes
         // de otros buddies que, si no responden a tiempo, cualquiera puede
         // tomar. Nunca incluye la oferta oficial propia: esa ya está arriba.
-        if (state.availableHelp.isNotEmpty()) {
+        run {
             ListHeader("OPORTUNIDADES PARA AYUDAR", state.availableHelp.size, BuddyColor.Accent)
             Column(
                 Modifier.padding(horizontal = Spacing.edge),
@@ -311,17 +311,13 @@ private fun ConnectionList(
         }
 
         // ── ACOMPAÑAMIENTO ABIERTO — viajeros a los que YO ayudo ───────────
-        if (state.activeAsBuddy.isNotEmpty()) {
-            ActiveSection("ACOMPAÑAMIENTO ABIERTO", state.activeAsBuddy, BuddyColor.Accent, onOpen)
-        }
+        ActiveSection("ACOMPAÑAMIENTO ABIERTO", state.activeAsBuddy, BuddyColor.Accent, onOpen)
 
         // ── VÍNCULO ABIERTO — la persona que ME ayuda ──────────────────────
-        if (state.activeAsTraveler.isNotEmpty()) {
-            ActiveSection("VÍNCULO ABIERTO", state.activeAsTraveler, BuddyColor.Brand, onOpen)
-        }
+        ActiveSection("VÍNCULO ABIERTO", state.activeAsTraveler, BuddyColor.Brand, onOpen)
 
         // ── ENCUENTROS ANTERIORES — filas planas, sin cajas ───────────────
-        if (state.past.isNotEmpty()) {
+        run {
             ListHeader("ENCUENTROS ANTERIORES", state.past.size, BuddyColor.InkMuted)
             Column {
                 state.past.forEachIndexed { i, item ->
@@ -353,8 +349,7 @@ private fun ActiveSection(
     color: Color,
     onOpen: (String) -> Unit,
 ) {
-    // El conteo solo se muestra con más de un item (como iOS)
-    ListHeader(title, if (items.size > 1) items.size else 0, color)
+    ListHeader(title, items.size, color)
     Column(
         Modifier.padding(horizontal = Spacing.edge),
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -381,9 +376,9 @@ private fun ListHeader(title: String, count: Int, color: Color) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(title, style = BuddyType.Eyebrow.copy(letterSpacing = 1.5.sp), color = color)
-        if (count > 0) {
-            Text("· $count", style = BuddyType.Eyebrow, color = BuddyColor.InkMuted.copy(alpha = 0.7f))
-        }
+        // Siempre visible, también en 0: las secciones son fijas, así que el
+        // número es lo que dice si hay algo o no.
+        Text("· $count", style = BuddyType.Eyebrow, color = BuddyColor.InkMuted.copy(alpha = 0.7f))
     }
 }
 
