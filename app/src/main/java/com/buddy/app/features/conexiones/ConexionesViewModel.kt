@@ -57,6 +57,19 @@ data class ConnectionItem(
 
     val avatarUrl: String? get() = if (isBuddyRole) match.traveler?.avatarUrl else match.buddy?.avatarUrl
 
+    /**
+     * Desde dónde piden ayuda, con la categoría: "Lima · Transporte".
+     * Un buddy puede estar atendiendo varias ciudades a la vez, así que sin
+     * esto dos conversaciones abiertas se ven iguales.
+     */
+    val contextLine: String?
+        get() {
+            val place = match.helpRequest?.destination?.name
+            val category = match.helpRequest?.category?.let { CATEGORY_LABELS[it] ?: it }
+            val parts = listOfNotNull(place, category).filter { it.isNotBlank() }
+            return if (parts.isEmpty()) null else parts.joinToString(" · ")
+        }
+
     /** El otro respondió y yo aún no contesto (cuenta para el badge del tab). */
     val pendingReply: Boolean
         get() = lastMessage != null && myTravelerId != null && lastMessage.senderId != myTravelerId

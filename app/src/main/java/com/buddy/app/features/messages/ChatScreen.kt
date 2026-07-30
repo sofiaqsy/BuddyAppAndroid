@@ -187,6 +187,8 @@ fun ChatScreen(
     }
     val buddyAvatarUrl = otherPerson?.avatarUrl
     val buddyInitials = TravelerAlias.initials(otherPerson?.fullName, otherPersonId)
+    /** Ciudad desde la que se pidió esta ayuda. */
+    val helpPlace = match?.helpRequest?.destination?.name?.takeIf { it.isNotBlank() }
 
     // ── UI state ──────────────────────────────────────────────────────────────
     var showMenu by remember { mutableStateOf(false) }
@@ -343,6 +345,13 @@ fun ChatScreen(
                             style = BuddyType.Caption1,
                             color = if (state.buddyIsOnline) BuddyColor.Accent else BuddyColor.InkMuted,
                         )
+                        // Desde dónde piden ayuda. Va aquí arriba porque un buddy
+                        // puede tener varias ciudades abiertas a la vez y necesita
+                        // saberlo sin salir de la conversación.
+                        helpPlace?.let { place ->
+                            Text("·", style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+                            Text(place, style = BuddyType.Caption1, color = BuddyColor.InkMuted, maxLines = 1)
+                        }
                     }
                 }
 

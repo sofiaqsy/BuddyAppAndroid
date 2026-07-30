@@ -61,7 +61,7 @@ import java.time.temporal.ChronoUnit
 
 /**
  * Espejo 1:1 de ConexionesView (iOS): header "TU GENTE / Tus conexiones.",
- * secciones ALGUIEN LLEGA (OfferCards con Acompañar/Ahora no), ACOMPAÑAMIENTO
+ * secciones ASIGNADAS PARA TI (OfferCards con Acompañar/Ahora no), ACOMPAÑAMIENTO
  * ABIERTO (yo ayudo), VÍNCULO ABIERTO (me ayudan), ENCUENTROS ANTERIORES
  * (filas planas) y empty state "Las conexiones nacen de un trip".
  */
@@ -265,9 +265,9 @@ private fun ConnectionList(
     onOpen: (String) -> Unit,
 ) {
     Column(Modifier.verticalScroll(rememberScrollState())) {
-        // ── ALGUIEN LLEGA — solicitudes pendientes para buddies ────────────
+        // ── ASIGNADAS PARA TI — solicitudes pendientes para este buddy ─────
         if (state.offers.isNotEmpty()) {
-            ListHeader("ALGUIEN LLEGA", state.offers.size, BuddyColor.Brand)
+            ListHeader("ASIGNADAS PARA TI", state.offers.size, BuddyColor.Brand)
             Column(
                 Modifier.padding(horizontal = Spacing.edge),
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm),
@@ -361,7 +361,7 @@ private fun ListHeader(title: String, count: Int, color: Color) {
     }
 }
 
-// ── Offer Card — "ALGUIEN LLEGA" (Acompañar / Ahora no) ────────────────────
+// ── Offer Card — "ASIGNADAS PARA TI" (Acompañar / Ahora no) ───────────────
 private val CATEGORY_LABELS = mapOf(
     "transport" to "Cómo llegar", "food" to "Comer", "translation" to "Traducir",
     "activities" to "Qué hacer", "accommodation" to "Alojamiento",
@@ -521,6 +521,12 @@ private fun ConnectionRow(item: ConnectionItem, isActive: Boolean) {
                     modifier = Modifier.weight(1f),
                 )
                 Text(item.lastTime, style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+            }
+            // Desde dónde piden ayuda — mismo dato que ya muestran las tarjetas
+            // de oportunidades. Sin esto, con dos ciudades abiertas a la vez las
+            // conversaciones son indistinguibles.
+            item.contextLine?.let { context ->
+                Text(context, style = BuddyType.Caption1, color = BuddyColor.InkMuted, maxLines = 1)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (item.lastMessage != null && item.isLastFromMe) {

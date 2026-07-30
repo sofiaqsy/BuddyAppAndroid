@@ -1,5 +1,6 @@
 package com.buddy.app.features.matching.data
 
+import com.buddy.app.core.data.model.ApiDestinationRef
 import com.buddy.app.core.data.model.ApiUserRef
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -147,6 +148,20 @@ data class ApiMatch(
     val traveler: ApiUserRef? = null,
     val buddy: ApiUserRef? = null,
     @SerialName("feedback_submitted") val feedbackSubmitted: Boolean? = null,
+    /**
+     * El backend siempre lo manda en /matching/matches. Trae el destino, que
+     * es lo que deja saber DESDE DÓNDE piden ayuda — un buddy puede estar
+     * atendiendo varios lugares a la vez y sin esto las conversaciones son
+     * indistinguibles.
+     */
+    @SerialName("help_request") val helpRequest: MatchHelpRequest? = null,
+)
+
+@Serializable
+data class MatchHelpRequest(
+    val category: String? = null,
+    val description: String? = null,
+    val destination: ApiDestinationRef? = null,
 )
 
 @Serializable
