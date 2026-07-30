@@ -310,11 +310,9 @@ private fun ConnectionList(
             }
         }
 
-        // ── ACOMPAÑAMIENTO ABIERTO — viajeros a los que YO ayudo ───────────
-        ActiveSection("ACOMPAÑAMIENTO ABIERTO", state.activeAsBuddy, BuddyColor.Accent, onOpen)
-
-        // ── VÍNCULO ABIERTO — la persona que ME ayuda ──────────────────────
-        ActiveSection("VÍNCULO ABIERTO", state.activeAsTraveler, BuddyColor.Brand, onOpen)
+        // ── ACOMPAÑAMIENTO ABIERTO — toda conversación viva, ayude yo o me
+        // ayuden. La fila ya dice con quién y desde dónde.
+        ActiveSection("ACOMPAÑAMIENTO ABIERTO", state.active, BuddyColor.Accent, onOpen)
 
         // ── ENCUENTROS ANTERIORES — filas planas, sin cajas ───────────────
         run {

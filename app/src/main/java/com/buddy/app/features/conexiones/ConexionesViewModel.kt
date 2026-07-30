@@ -148,11 +148,13 @@ class ConexionesViewModel @Inject constructor(
         /** Match recién aceptado → abrir su chat de inmediato (como iOS). */
         val openMatch: ApiMatch? = null,
     ) {
-        private val active get() = connections.filter { it.match.status in listOf("pending", "accepted", "active") }
-        /** Activos donde YO ayudo → ACOMPAÑAMIENTO ABIERTO. */
-        val activeAsBuddy: List<ConnectionItem> get() = active.filter { it.isBuddyRole }
-        /** Activos donde ME ayudan → VÍNCULO ABIERTO. */
-        val activeAsTraveler: List<ConnectionItem> get() = active.filter { !it.isBuddyRole }
+        /**
+         * ACOMPAÑAMIENTO ABIERTO — toda conexión viva, sin separar por rol: da
+         * igual si YO ayudo o me ayudan, es una conversación abierta que sigue
+         * su curso.
+         */
+        val active: List<ConnectionItem>
+            get() = connections.filter { it.match.status in listOf("pending", "accepted", "active") }
         /** ENCUENTROS ANTERIORES. */
         val past: List<ConnectionItem> get() = connections.filter { it.match.status == "completed" }
 
