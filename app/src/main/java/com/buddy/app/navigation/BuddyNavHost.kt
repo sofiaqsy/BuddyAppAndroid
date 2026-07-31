@@ -141,6 +141,7 @@ fun BuddyRoot() {
                 onOpenBook = { journey, page -> bookJourney = journey to page },
                 onOpenMap = { mapJourney = it },
                 onPublished = { selectedTab = AppTab.Inicio },
+                isApprovedBuddy = conexionesState.isApprovedBuddy,
             )
             AppTab.Conexiones -> ConexionesScreen(modifier, onOpenTrips = { selectedTab = AppTab.Trips })
             AppTab.Yo -> YoScreen(modifier, onOpenTrips = { selectedTab = AppTab.Trips })

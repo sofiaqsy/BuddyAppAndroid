@@ -1,5 +1,6 @@
 package com.buddy.app.features.trips
 
+import android.Manifest
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -78,11 +79,30 @@ fun TripsScreen(
     onOpenMap: (ApiJourney) -> Unit = {},
     /** Tras publicar: volver al Inicio (espejo de AppRouter.switchTo(.inicio)). */
     onPublished: () -> Unit = {},
+    /** Fase 2 "Buddy Community Places" — mismo flag que ya gatea "Oportunidades
+     *  para ayudar" en Conexiones (BuddyNavHost lo pasa desde conexionesState). */
+    isApprovedBuddy: Boolean = false,
     viewModel: TripsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
     var showCancelConfirm by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<ApiJourney?>(null) }
+
+    // ── Fase 2 "Buddy Community Places": Compartir un lugar ────────────────
+    var shareLugarStep by remember { mutableStateOf(ShareLugarStep.Choose) }
+    val locationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        if (grants.values.any { it }) viewModel.shareCurrentLocation()
+    }
+    // El journey ya existe en el backend cuando llega esto — abrir el mismo
+    // editor Memoir del flujo normal y limpiar el one-shot.
+    androidx.compose.runtime.LaunchedEffect(state.sharedLugarJourney) {
+        state.sharedLugarJourney?.let { journey ->
+            onOpenBook(journey, -1)
+            viewModel.consumeSharedLugarJourney()
+        }
+    }
 
     // ── Publicar historia — gate de identidad + confirmación (espejo iOS) ──
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -204,7 +224,37 @@ fun TripsScreen(
             else -> EmptyTripsState(onRegister = viewModel::openRegister)
         }
 
+        if (isApprovedBuddy) {
+            Spacer(Modifier.height(Spacing.md))
+            CompartirLugarCard(
+                onTap = {
+                    shareLugarStep = ShareLugarStep.Choose
+                    viewModel.openShareLugar()
+                },
+                modifier = Modifier.padding(horizontal = Spacing.edge),
+            )
+        }
+
         Spacer(Modifier.height(100.dp))
+    }
+
+    if (state.showShareLugarSheet) {
+        CompartirLugarSheet(
+            step = shareLugarStep,
+            searchResults = state.shareLugarSearchResults,
+            isSubmitting = state.isSharingLugar,
+            errorMessage = state.shareLugarError,
+            onDismiss = viewModel::closeShareLugar,
+            onUseCurrentLocation = {
+                locationPermissionLauncher.launch(arrayOf(
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                ))
+            },
+            onSearchInstead = { shareLugarStep = ShareLugarStep.Search },
+            onQueryChange = viewModel::shareLugarSearch,
+            onPickResult = viewModel::shareSearchResult,
+        )
     }
 
 

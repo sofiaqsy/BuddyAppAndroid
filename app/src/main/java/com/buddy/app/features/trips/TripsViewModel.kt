@@ -30,6 +30,7 @@ class TripsViewModel @Inject constructor(
     private val travelerRepo: TravelerRepository,
     private val matchingRepo: com.buddy.app.features.matching.data.MatchingRepository,
     private val sse: com.buddy.app.core.network.SseClient,
+    private val locationProvider: com.buddy.app.core.location.LocationProvider,
 ) : ViewModel() {
 
     data class TripsState(
@@ -41,6 +42,15 @@ class TripsViewModel @Inject constructor(
         val isCreating: Boolean = false,
         val activeBuddyName: String? = null,
         val activeBuddyAvatarUrl: String? = null,
+        // Fase 2 "Buddy Community Places" — estado separado del de "Registrar
+        // trip" a propósito: son dos sheets distintos, no deben compartir
+        // resultados de búsqueda ni flags de carga entre sí.
+        val showShareLugarSheet: Boolean = false,
+        val shareLugarSearchResults: List<ApiPlaceResult> = emptyList(),
+        val isSharingLugar: Boolean = false,
+        val shareLugarError: String? = null,
+        /** One-shot: la pantalla lo consume (abre el editor Memoir) y lo limpia. */
+        val sharedLugarJourney: ApiJourney? = null,
     ) {
         /** Mismo filtro/orden que visibleTrips (iOS): active primero, luego llegada desc. */
         val visibleTrips: List<ApiJourney>
@@ -180,6 +190,75 @@ class TripsViewModel @Inject constructor(
             }
         }
     }
+
+    // ── Fase 2 "Buddy Community Places": Compartir un lugar ──────────────
+
+    private var shareLugarSearchJob: Job? = null
+
+    fun openShareLugar() = _state.update {
+        it.copy(showShareLugarSheet = true, shareLugarSearchResults = emptyList(), shareLugarError = null)
+    }
+    fun closeShareLugar() = _state.update { it.copy(showShareLugarSheet = false) }
+
+    fun shareLugarSearch(query: String) {
+        shareLugarSearchJob?.cancel()
+        if (query.trim().length < 2) {
+            _state.update { it.copy(shareLugarSearchResults = emptyList()) }
+            return
+        }
+        shareLugarSearchJob = viewModelScope.launch {
+            delay(300)
+            runCatching { api.searchPlaces(query) }
+                .onSuccess { res -> _state.update { it.copy(shareLugarSearchResults = res.items) } }
+                .onFailure { Log.e(TAG, "shareLugarSearch failed", it) }
+        }
+    }
+
+    /** Requiere permiso de ubicación ya concedido — TripsScreen lo pide antes de llamar esto. */
+    fun shareCurrentLocation() {
+        if (_state.value.isSharingLugar) return
+        viewModelScope.launch {
+            val loc = locationProvider.currentLocation()
+            if (loc == null) {
+                _state.update { it.copy(shareLugarError = "No pudimos obtener tu ubicación. Activa el GPS o busca el lugar manualmente.") }
+                return@launch
+            }
+            shareLugar { tripRepo.shareLugar(lat = loc.lat, lng = loc.lng) }
+        }
+    }
+
+    fun shareSearchResult(place: ApiPlaceResult) = shareLugar {
+        when (place.source) {
+            "destination" -> tripRepo.shareLugar(destinationId = place.id)
+            "place" -> tripRepo.shareLugar(placeId = place.id, lat = place.lat, lng = place.lng)
+            else -> {
+                if (place.lat == null || place.lng == null) {
+                    error("Ese resultado no tiene coordenadas — prueba con otra búsqueda.")
+                }
+                tripRepo.shareLugar(lat = place.lat, lng = place.lng)
+            }
+        }
+    }
+
+    private fun shareLugar(create: suspend () -> ApiJourney) {
+        if (_state.value.isSharingLugar) return
+        viewModelScope.launch {
+            _state.update { it.copy(isSharingLugar = true, shareLugarError = null) }
+            runCatching { create() }
+                .onSuccess { journey ->
+                    _state.update {
+                        it.copy(isSharingLugar = false, showShareLugarSheet = false, sharedLugarJourney = journey)
+                    }
+                }
+                .onFailure { e ->
+                    Log.e(TAG, "shareLugar failed", e)
+                    _state.update { it.copy(isSharingLugar = false, shareLugarError = "No pudimos compartir este lugar. Inténtalo de nuevo.") }
+                }
+        }
+    }
+
+    /** Consumido por TripsScreen tras abrir el editor Memoir con el journey creado. */
+    fun consumeSharedLugarJourney() = _state.update { it.copy(sharedLugarJourney = null) }
 
     companion object { private const val TAG = "TripsVM" }
 }

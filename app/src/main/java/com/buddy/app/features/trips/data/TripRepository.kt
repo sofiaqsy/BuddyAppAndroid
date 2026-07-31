@@ -64,5 +64,15 @@ class TripRepository @Inject constructor(
         return created
     }
 
+    /**
+     * "Compartir un lugar" (Fase 2 de Buddy Community Places) — espejo de
+     * createJourney(..., attachToTrip: false) en APIClient.swift. El journey
+     * nace con trip_id=null a propósito: nunca participa del PATCH /trips/:id
+     * en cascada que completa y publica TODO el trip. El backend ya exige
+     * buddy aprobado — este método no duplica esa validación.
+     */
+    suspend fun shareLugar(destinationId: String? = null, placeId: String? = null, lat: Double? = null, lng: Double? = null): ApiJourney =
+        api.createJourney(CreateJourneyBody(destinationId = destinationId, placeId = placeId, lat = lat, lng = lng, attachToTrip = false))
+
     companion object { private const val TAG = "TripRepo" }
 }
