@@ -41,9 +41,11 @@ fun BuddyRoot() {
     var openChatId by rememberSaveable { mutableStateOf<String?>(null) }
     var openChatCategory by rememberSaveable { mutableStateOf<String?>(null) }
     // Editor Memoir a pantalla completa — como iOS oculta tab bar y nav bar.
-    // Par (journey, initialPage): -1 = nuevo momento, índice = editar página.
+    // Triple (journey, initialPage, isStandaloneShare): -1 = nuevo momento,
+    // índice = editar página. isStandaloneShare=true → "Compartir un lugar"
+    // (Fase 2): publica solo al salir, sin botón "Publicar" aparte.
     var bookJourney by androidx.compose.runtime.remember {
-        mutableStateOf<Pair<com.buddy.app.core.data.model.ApiJourney, Int>?>(null)
+        mutableStateOf<Triple<com.buddy.app.core.data.model.ApiJourney, Int, Boolean>?>(null)
     }
     // Mapa del trip a pantalla completa (espejo de TripDetailView en iOS)
     var mapJourney by androidx.compose.runtime.remember {
@@ -77,10 +79,11 @@ fun BuddyRoot() {
     // Editor abierto → pantalla completa SIN tab bar ni chrome (como iOS:
     // .toolbar(.hidden) + ignoresSafeArea). Flujo idéntico a TripEditorSheet:
     // del tap en "Tu historia empieza aquí" se entra DIRECTO al editor.
-    bookJourney?.let { (journey, initialPage) ->
+    bookJourney?.let { (journey, initialPage, isStandaloneShare) ->
         com.buddy.app.features.trips.memoir.TripEditorSheet(
             journey = journey,
             initialPage = initialPage,
+            isStandaloneShare = isStandaloneShare,
             onDismiss = { bookJourney = null; tripsVm.load() },
         )
         return
@@ -138,7 +141,7 @@ fun BuddyRoot() {
             AppTab.Trips -> TripsScreen(
                 modifier,
                 onOpenConexiones = { selectedTab = AppTab.Conexiones },
-                onOpenBook = { journey, page -> bookJourney = journey to page },
+                onOpenBook = { journey, page, isStandaloneShare -> bookJourney = Triple(journey, page, isStandaloneShare) },
                 onOpenMap = { mapJourney = it },
                 onPublished = { selectedTab = AppTab.Inicio },
                 isApprovedBuddy = conexionesState.isApprovedBuddy,

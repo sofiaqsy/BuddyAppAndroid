@@ -73,8 +73,10 @@ fun TripsScreen(
     modifier: Modifier = Modifier,
     onOpenConexiones: () -> Unit = {},
     /** Abre el editor Memoir a pantalla completa — el overlay vive en BuddyRoot,
-     *  fuera del Scaffold. page: -1 = nuevo momento, índice = editar página. */
-    onOpenBook: (ApiJourney, Int) -> Unit = { _, _ -> },
+     *  fuera del Scaffold. page: -1 = nuevo momento, índice = editar página.
+     *  isStandaloneShare: true solo para "Compartir un lugar" (Fase 2) —
+     *  publica solo al salir del editor, ver TripEditorSheet.kt. */
+    onOpenBook: (ApiJourney, Int, Boolean) -> Unit = { _, _, _ -> },
     /** Abre el mapa del trip a pantalla completa (overlay en BuddyRoot, como iOS). */
     onOpenMap: (ApiJourney) -> Unit = {},
     /** Tras publicar: volver al Inicio (espejo de AppRouter.switchTo(.inicio)). */
@@ -99,7 +101,7 @@ fun TripsScreen(
     // editor Memoir del flujo normal y limpiar el one-shot.
     androidx.compose.runtime.LaunchedEffect(state.sharedLugarJourney) {
         state.sharedLugarJourney?.let { journey ->
-            onOpenBook(journey, -1)
+            onOpenBook(journey, -1, true)
             viewModel.consumeSharedLugarJourney()
         }
     }
@@ -210,7 +212,7 @@ fun TripsScreen(
                 journey = state.selectedTrip!!,
                 buddyName = state.activeBuddyName,
                 buddyAvatarUrl = state.activeBuddyAvatarUrl,
-                onEdit = { page -> state.selectedTrip?.let { onOpenBook(it, page) } },
+                onEdit = { page -> state.selectedTrip?.let { onOpenBook(it, page, false) } },
                 onMapTap = { state.selectedTrip?.let(onOpenMap) },
                 // Sin login → sheet de identidad; con login → confirmación (iOS)
                 onPublishTap = {

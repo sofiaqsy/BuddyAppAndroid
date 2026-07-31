@@ -53,9 +53,15 @@ class TripsViewModel @Inject constructor(
         val sharedLugarJourney: ApiJourney? = null,
     ) {
         /** Mismo filtro/orden que visibleTrips (iOS): active primero, luego llegada desc. */
+        // tripId == null excluye a propósito los journeys de "Compartir un
+        // lugar" (Fase 2): sin este filtro, uno de esos journeys se colaba
+        // como si fuera TU viaje en curso — su tarjeta, su cancelar, etc.,
+        // cuando en realidad no es un trip. Se publican solos al salir del
+        // editor (ver TripsScreen.onOpenBook / MemoirPublishViewModel) y de
+        // ahí en más solo viven en la galería del lugar.
         val visibleTrips: List<ApiJourney>
             get() = journeys
-                .filter { it.status in listOf("active", "planning") }
+                .filter { it.tripId != null && it.status in listOf("active", "planning") }
                 .sortedWith(compareBy({ if (it.status == "active") 0 else 1 }, { it.arrivalAt ?: "" }))
 
         val selectedTrip: ApiJourney?
@@ -99,7 +105,7 @@ class TripsViewModel @Inject constructor(
                 travelerRepo.ensureSession()
                 val journeys = tripRepo.myJourneys()
                 // Match activo para la fila del buddy (como activeMatch en iOS)
-                val hasActive = journeys.any { it.status == "active" }
+                val hasActive = journeys.any { it.tripId != null && it.status == "active" }
                 val activeMatch = if (hasActive) {
                     runCatching { matchingRepo.matches() }.getOrDefault(emptyList())
                         .firstOrNull { it.status in listOf("pending", "accepted", "active") }
