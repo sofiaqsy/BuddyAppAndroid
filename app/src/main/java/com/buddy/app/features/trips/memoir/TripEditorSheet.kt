@@ -1,5 +1,8 @@
 package com.buddy.app.features.trips.memoir
 
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -10,6 +13,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.buddy.app.core.data.model.ApiJourney
+import kotlinx.coroutines.launch
 
 /**
  * Espejo de TripEditorSheet (TripsView.swift): editor DIRECTO sin book view.
@@ -38,6 +42,10 @@ fun TripEditorSheet(
     val publishVm: MemoirPublishViewModel = hiltViewModel()
     var didStart by remember { mutableStateOf(false) }
     var isPublishingShare by remember { mutableStateOf(false) }
+    // Salir del editor de UNA página (el check del canvas) solo guarda esa
+    // página — no es "terminé de compartir". Este confirm es el único lugar
+    // donde esa decisión se toma explícitamente.
+    var showShareConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         // Guard: igual que iOS — el arranque solo corre una vez
@@ -59,17 +67,14 @@ fun TripEditorSheet(
     LaunchedEffect(book.isEditing) {
         if (!didStart || book.isEditing) return@LaunchedEffect
         if (isStandaloneShare) {
-            if (isPublishingShare) return@LaunchedEffect
             val hasContent = book.pages.any { it.itemSnapshots.isNotEmpty() || it.backgroundImageFile != null }
-            if (!hasContent) {
+            if (hasContent) {
+                showShareConfirm = true   // guardaste la foto — ¿ya terminaste?
+            } else {
                 // Sin fotos — nada que compartir. El journey queda sin publicar
                 // (is_public sigue false, nunca visible) y se descarta.
                 onDismiss()
-                return@LaunchedEffect
             }
-            isPublishingShare = true
-            publishVm.publish(journey, book.pages.toList(), persistence)
-            onDismiss()
         } else {
             onDismiss()
         }
@@ -77,5 +82,29 @@ fun TripEditorSheet(
 
     if (book.isEditing) {
         TripCanvasEditor(book)
+    }
+
+    if (showShareConfirm) {
+        AlertDialog(
+            onDismissRequest = { showShareConfirm = false; onDismiss() },
+            title = { Text("¿Listo para compartir?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showShareConfirm = false
+                    if (!isPublishingShare) {
+                        isPublishingShare = true
+                        scope.launch {
+                            publishVm.publish(journey, book.pages.toList(), persistence)
+                            onDismiss()
+                        }
+                    }
+                }) { Text("Compartir") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showShareConfirm = false; book.addPage() }) {
+                    Text("Agregar otra foto")
+                }
+            },
+        )
     }
 }
