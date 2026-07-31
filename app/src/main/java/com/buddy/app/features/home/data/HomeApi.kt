@@ -93,8 +93,14 @@ interface HomeApi {
 
     // ── Comunidad viva (recent help + pulse) ────────────────────────────
 
-    /** GET /places/{id}/recent-help — actividad reciente en un destino. */
-    @GET("places/{id}/recent-help")
+    /**
+     * GET /matching/recent-help/{destinationId} — actividad reciente en un destino.
+     *
+     * La ruta es la de matching, no /places/{id}/recent-help: esa no existe en
+     * buddy-core y devolvía 404 en silencio (runCatching lo tragaba), así que
+     * "Comunidad viva" salía siempre vacía en Android. iOS ya usaba esta.
+     */
+    @GET("matching/recent-help/{id}")
     suspend fun recentHelpByPlace(@Path("id") placeId: String): List<ApiRecentHelp>
 
     /** GET /community/pulse — pulso global cuando no hay actividad local. */
@@ -103,6 +109,7 @@ interface HomeApi {
 }
 
 @kotlinx.serialization.Serializable
+@kotlinx.serialization.ExperimentalSerializationApi
 data class CreateJourneyBody(
     @kotlinx.serialization.SerialName("destination_id") val destinationId: String? = null,
     @kotlinx.serialization.SerialName("place_id") val placeId: String? = null,
@@ -113,6 +120,16 @@ data class CreateJourneyBody(
     @kotlinx.serialization.SerialName("arrival_at") val arrivalAt: String? = null,
     @kotlinx.serialization.SerialName("knows_how_to_get") val knowsHowToGet: Boolean? = null,
     @kotlinx.serialization.SerialName("has_lodging") val hasLodging: Boolean? = null,
+    // Explícito en el body a propósito, aunque true ya sea el default del
+    // backend cuando el campo falta: dentro de unos meses, alguien viendo un
+    // POST /journeys sin este campo no sabría que existe un segundo
+    // comportamiento (attach_to_trip=false — "Compartir un lugar"). Sin
+    // @EncodeDefault, kotlinx.serialization omite los campos en su valor
+    // default al serializar (mismo footgun que ya mordió a PublishBody) y
+    // este viajaría ausente igual que antes — @EncodeDefault fuerza que
+    // SIEMPRE vaya en el JSON, sea true o false.
+    @kotlinx.serialization.EncodeDefault(kotlinx.serialization.EncodeDefault.Mode.ALWAYS)
+    @kotlinx.serialization.SerialName("attach_to_trip") val attachToTrip: Boolean = true,
 )
 
 @kotlinx.serialization.Serializable
