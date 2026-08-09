@@ -75,12 +75,12 @@ import org.osmdroid.views.overlay.Marker
 
 /** Categorías de ayuda — mismas keys/labels que categoryOptions (iOS). */
 private val categoryOptions = listOf(
-    "transport" to "Cómo llegar",
+    "transport" to "Transporte",
     "food" to "Comer",
-    "translation" to "Traducir",
-    "activities" to "Qué hacer",
+    "shopping" to "Compras",
+    "activities" to "Actividades",
     "accommodation" to "Alojamiento",
-    "emergency" to "Seguridad",
+    "recommendations" to "Consejos",
 )
 
 /**

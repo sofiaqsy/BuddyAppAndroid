@@ -32,9 +32,9 @@ import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
 private val CATEGORY_LABELS = mapOf(
-    "transport" to "Cómo llegar", "food" to "Comer", "translation" to "Traducir",
-    "activities" to "Qué hacer", "accommodation" to "Alojamiento",
-    "emergency" to "Seguridad", "general" to "Ayuda",
+    "transport" to "Transporte", "food" to "Comer", "shopping" to "Compras",
+    "translation" to "Traducir", "activities" to "Actividades", "accommodation" to "Alojamiento",
+    "emergency" to "Seguridad", "general" to "Ayuda", "recommendations" to "Consejos",
 )
 
 /**

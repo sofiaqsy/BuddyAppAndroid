@@ -38,15 +38,23 @@ class MatchingViewModel @Inject constructor(
     private var sseJob: Job? = null
     private var pollJob: Job? = null
 
-    fun findBuddy(destinationId: String, category: String, description: String? = null) {
+    /**
+     * @param ensureJourney true (default) = contexto "Mi viaje": asegurar el
+     * trip ANTES de pedir ayuda, igual que siempre — así el journey aparece en
+     * "Tu trip" y el backend lo promueve a active. false = contexto "Ubicación
+     * actual": NO crear ni reusar journey — la solicitud viaja sin journey_id,
+     * igual que el flujo pioneer-less de iOS. El trip existente (si lo hay)
+     * queda intacto; no se introduce un segundo journey activo.
+     */
+    fun findBuddy(destinationId: String, category: String, description: String? = null, ensureJourney: Boolean = true) {
         if (_state.value is SearchState.Searching) return
         viewModelScope.launch {
             try {
-                // Igual que iOS: asegurar el trip ANTES de pedir ayuda — así el
-                // journey aparece en "Tu trip" y el backend lo promueve a active.
-                val journeyId = runCatching { tripRepo.ensureActiveTrip(destinationId).id }
-                    .onFailure { Log.w(TAG, "ensureActiveTrip falló — request sin journey", it) }
-                    .getOrNull()
+                val journeyId = if (ensureJourney) {
+                    runCatching { tripRepo.ensureActiveTrip(destinationId).id }
+                        .onFailure { Log.w(TAG, "ensureActiveTrip falló — request sin journey", it) }
+                        .getOrNull()
+                } else null
                 startRequest(destinationId, category, description, journeyId)
             } catch (e: Exception) {
                 Log.e(TAG, "createHelpRequest failed", e)

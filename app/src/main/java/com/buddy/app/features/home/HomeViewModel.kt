@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.buddy.app.core.data.model.ApiJourney
+import com.buddy.app.core.data.model.ApiPlaceCard
 import com.buddy.app.core.data.model.ApiPlaceContext
 import com.buddy.app.core.data.model.ApiPulseItem
 import com.buddy.app.core.data.model.ApiRecentHelp
@@ -75,6 +76,16 @@ class HomeViewModel @Inject constructor(
         /** true si el último mensaje lo envié yo → prefijo "Tú:" (estilo WhatsApp). */
         val isLastMessageFromMe: Boolean = false,
         val unreadMessageCount: Int = 0,
+        // MARK: – Explora {ciudad}
+        /** Lugares que los buddies recomiendan por aquí. Cuando hay, reemplazan
+         *  la grilla de categorías por el carrusel: la intención ya no se elige
+         *  primero, nace después de que un lugar llamó la atención. */
+        val exploreCards: List<ApiPlaceCard> = emptyList(),
+        val isLoadingExplore: Boolean = true,
+        /** Categoría de una solicitud MÍA todavía sin atender. Con esto el CTA
+         *  dice que la búsqueda sigue viva en vez de invitar a empezar otra —
+         *  la búsqueda pudo arrancar en otra pantalla. */
+        val openRequestCategory: String? = null,
         // MARK: – Comunidad viva
         val recentHelp: List<ApiRecentHelp> = emptyList(),  // actividad local en destino
         val communityPulse: List<ApiPulseItem> = emptyList(), // pulso global (fallback)
@@ -184,6 +195,8 @@ class HomeViewModel @Inject constructor(
                 loadTripAndMatch()
                 refreshCommunityContext()
                 loadCommunityLive()  // Cargar comunidad viva en paralelo
+                loadExploreCards()
+                refreshOpenRequest()
                 loadFeed()
             } catch (e: Exception) {
                 Log.e(TAG, "load failed", e)
@@ -199,7 +212,51 @@ class HomeViewModel @Inject constructor(
     fun refreshTripState() {
         viewModelScope.launch {
             runCatching { loadTripAndMatch() }
+            // La búsqueda pudo cerrarse dentro del chat, o haber arrancado en
+            // el mapa. Volver al Home es justo el momento de enterarse.
+            refreshOpenRequest()
         }
+    }
+
+    /**
+     * Los lugares del carrusel "Explora {ciudad}".
+     *
+     * Se piden por GPS y no por el destino elegido: son lugares de POR AQUÍ.
+     * Sin coordenadas el backend responde igual —los más recientes—, así que no
+     * se bloquea esperando permiso de ubicación.
+     */
+    private suspend fun loadExploreCards() {
+        _state.update { it.copy(isLoadingExplore = true) }
+        val s = _state.value
+        runCatching { api.placeShares(limit = 12, lat = s.userLat, lng = s.userLng).items }
+            .onSuccess { cards ->
+                Log.d(TAG, "placeShares → ${cards.size}: ${cards.joinToString { c -> "${c.name}(${c.photoCount}f/${c.buddyCount}b)" }}")
+                _state.update { it.copy(exploreCards = cards, isLoadingExplore = false) }
+            }
+            .onFailure {
+                Log.e(TAG, "placeShares failed", it)
+                // isLoadingExplore=false sin vaciar exploreCards: un fallo no es
+                // "no hay lugares". Si ya había tarjetas se quedan; si no, el
+                // composer cae al CTA suelto, que es su estado legítimo.
+                _state.update { st -> st.copy(isLoadingExplore = false) }
+            }
+    }
+
+    /**
+     * Mi solicitud abierta, si la hay. Alimenta el estado "Buscando buddy…" del
+     * CTA — sin esto el Home invita a empezar una búsqueda que ya está viva.
+     */
+    private suspend fun refreshOpenRequest() {
+        runCatching { matchingApi.myRequest().body() }
+            .onSuccess { req ->
+                Log.d(TAG, "openRequest → ${req?.category ?: "ninguna"}")
+                _state.update { it.copy(openRequestCategory = req?.category) }
+            }
+            .onFailure {
+                // Un fallo NO se escribe como "no hay solicitud": eso apagaría
+                // el estado de búsqueda de alguien que sí está buscando.
+                Log.e(TAG, "myRequest failed — conservo el estado anterior", it)
+            }
     }
 
     fun onPermissionResult(granted: Boolean) {

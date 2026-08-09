@@ -60,9 +60,12 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Hiking
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Mic
@@ -74,6 +77,7 @@ import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -934,12 +938,14 @@ private fun ImageBubble(url: String, timeStr: String?) {
 private fun CategoryCardBubble(content: String, isMe: Boolean) {
     val key = content.removePrefix("category_card:")
     val (icon, label, subtitle) = when (key) {
-        "transport" -> Triple(Icons.Filled.Map, "Cómo llegar", "Rutas y transporte")
-        "food" -> Triple(Icons.Filled.Place, "Comer", "Comida y restaurantes")
+        "transport" -> Triple(Icons.Filled.DirectionsCar, "Transporte", "Rutas y movilidad")
+        "food" -> Triple(Icons.Filled.Place, "Comer", "Restaurantes y sabores locales")
+        "shopping" -> Triple(Icons.Filled.ShoppingBag, "Compras", "Productos locales")
         "translation" -> Triple(Icons.Filled.Person, "Traducir", "Frases, señales y más")
-        "activities" -> Triple(Icons.Filled.Search, "Qué hacer", "Tours y actividades")
-        "accommodation" -> Triple(Icons.Filled.Place, "Alojamiento", "Hoteles, hostales y más")
+        "activities" -> Triple(Icons.Filled.Hiking, "Actividades", "Tours y experiencias")
+        "accommodation" -> Triple(Icons.Filled.Place, "Alojamiento", "Hoteles y hospedajes")
         "emergency" -> Triple(Icons.Filled.CheckCircle, "Seguridad", "Emergencias y consejos")
+        "recommendations" -> Triple(Icons.Filled.Lightbulb, "Consejos", "Recomendaciones y ayuda")
         else -> Triple(Icons.Filled.Search, key, "Solicitud de ayuda")
     }
     Row(

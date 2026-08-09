@@ -25,18 +25,24 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bed
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Coffee
+import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.Hiking
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -63,6 +69,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.buddy.app.core.data.model.ApiJourney
+import com.buddy.app.core.data.model.ApiPlaceCard
 import com.buddy.app.core.data.model.ApiPlaceContext
 import com.buddy.app.core.TravelerAlias
 import com.buddy.app.core.designsystem.BuddyColor
@@ -91,6 +98,9 @@ fun InicioScreen(
     onOpenTrips: () -> Unit = {},
     onOpenConexiones: () -> Unit = {},
     onOpenChat: (matchId: String, initialCategory: String?) -> Unit = { _, _ -> },
+    /** Abre el lugar del carrusel en el mapa de su destino. Lo resuelve quien
+     *  contiene la pantalla: el Home no conoce rutas, igual que en iOS. */
+    onOpenPlace: (ApiPlaceCard) -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
     matchingViewModel: MatchingViewModel = hiltViewModel(),
 ) {
@@ -117,6 +127,51 @@ fun InicioScreen(
 
     val isPioneerRegistering by matchingViewModel.isPioneerRegistering.collectAsState()
     val isFindingBuddy = searchState is MatchingViewModel.SearchState.Searching || isPioneerRegistering
+
+    var mostrarIntenciones by remember { mutableStateOf(false) }
+
+    /**
+     * Espejo de submitHelpFromHome (iOS), con el contexto explícito del selector
+     * en vez de "hay trip → usarlo siempre": buddy activo (solo si el trip
+     * elegido es el que tiene match) → seguir la conversación; pioneer con
+     * destino → trip + solicitud y a "Tu trip"; pioneer sin destino pero con GPS
+     * → pioneerRegister; sin nada → registro de trip.
+     *
+     * Sale de la celda de categoría —que ya no existe en el Home— y pasa a ser
+     * lo que dispara la hoja de intenciones. La lógica no cambió.
+     */
+    val solicitarAyuda: (String) -> Unit = solicitarAyuda@{ category ->
+        val effectiveContext = state.effectiveHomeContext
+        val selectedIsActiveTrip = effectiveContext is HomeContext.Trip &&
+            effectiveContext.journeyId == state.activeJourney?.id
+        val isPioneer = state.communityContext?.totalBuddies == 0
+        val activeMatchId = state.activeMatchId
+        when {
+            // Buddy asignado: solo intercepta si el trip elegido es el que tiene
+            // el match — con "Ubicación actual" (u otro trip sin match) elegida,
+            // una categoría nueva siempre arma una solicitud nueva.
+            selectedIsActiveTrip && activeMatchId != null ->
+                onOpenChat(activeMatchId, category)
+            selectedIsActiveTrip && state.activeBuddyName != null ->
+                onOpenConexiones()
+            // Pioneer: sin buddies no hay nada que buscar — registra trip +
+            // solicitud en silencio y navega a "Tu trip" (iOS).
+            isPioneer && (state.destinationId != null || state.userLat != null) ->
+                matchingViewModel.pioneerRegister(
+                    destinationId = state.destinationId,
+                    lat = state.userLat, lng = state.userLng,
+                    category = category,
+                    cityName = state.destinationName,
+                    onDone = onOpenTrips,
+                )
+            state.destinationId != null ->
+                matchingViewModel.findBuddy(
+                    state.destinationId!!, category,
+                    ensureJourney = effectiveContext is HomeContext.Trip,
+                )
+            else -> onOpenTrips()   // sin ubicación: registrar trip a mano (como iOS)
+        }
+    }
 
     Column(
         modifier.fillMaxSize().background(BuddyColor.Canvas).verticalScroll(rememberScrollState()),
@@ -148,55 +203,88 @@ fun InicioScreen(
         // intención se procesa (pioneer: trip + solicitud) — paridad con iOS.
         Box {
         Column(Modifier.padding(horizontal = Spacing.edge).alpha(if (isFindingBuddy) 0.5f else 1f)) {
-            LocationContext(
-                city = state.destinationName,
-                onRequestPermission = {
-                    permissionLauncher.launch(arrayOf(
-                        Manifest.permission.ACCESS_COARSE_LOCATION,
-                        Manifest.permission.ACCESS_FINE_LOCATION,
-                    ))
-                },
-            )
+            val effectiveContext = state.effectiveHomeContext
+            // El trip seleccionado ES el que tiene el match activo — con 2+
+            // trips vivos, uno puede no tener buddy asignado (ej: Villa Rica
+            // en "planning" mientras San Francisco tiene el match).
+            val selectedIsActiveTrip = effectiveContext is HomeContext.Trip &&
+                effectiveContext.journeyId == state.activeJourney?.id
+            // true cuando algo se pinta ARRIBA de CategoryPicker (el selector,
+            // o LocationContext en Case 4). CategoryPicker ya trae su propio
+            // Spacer(Spacing.md) antes del heading — sin esta bandera, el
+            // Spacer(Spacing.md) de arriba de la pantalla se sumaba a ese
+            // incluso sin nada que separar (Case 3), dejando un espacio doble
+            // e injustificado encima de "Consulta con un buddy".
+            val hasHeaderRow = (effectiveContext != null && state.homeContextOptionCount > 1) || effectiveContext == null
+            if (effectiveContext != null && state.homeContextOptionCount > 1) {
+                // 2+ opciones distintas (Ubicación actual + uno o más trips):
+                // selector interactivo. "Ubicación actual" se omite si coincide
+                // con alguno de los trips (matchingTripForGPS) — esa fila ya
+                // cubre ambas cosas, no se repite.
+                HomeContextSelector(
+                    context = effectiveContext,
+                    hasCurrentLocation = state.shouldOfferCurrentLocationOption,
+                    currentLocationCity = state.gpsDestinationName,
+                    trips = state.liveJourneys.map { HomeContextTripOption(it.id, it.destination?.name ?: "Mi viaje") },
+                    onSelect = viewModel::setHomeContext,
+                )
+                Spacer(Modifier.height(Spacing.xs))
+            } else if (effectiveContext == null) {
+                // Case 4: ni GPS ni trip — flujo de permisos/registro existente.
+                LocationContext(
+                    city = state.destinationName,
+                    onRequestPermission = {
+                        permissionLauncher.launch(arrayOf(
+                            Manifest.permission.ACCESS_COARSE_LOCATION,
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                        ))
+                    },
+                )
+            }
             CategoryPicker(
                 destinationName = state.destinationName,
                 communityContext = state.communityContext,
-                activeBuddyName = state.activeBuddyName,
-                activeBuddyAvatarUrl = state.activeBuddyAvatarUrl,
+                activeBuddyName = if (selectedIsActiveTrip) state.activeBuddyName else null,
+                activeBuddyAvatarUrl = if (selectedIsActiveTrip) state.activeBuddyAvatarUrl else null,
+                activeBuddySubtitle = if (selectedIsActiveTrip) state.lastBuddyMessage else null,
+                activeBuddyHasUnread = selectedIsActiveTrip && state.unreadMessageCount > 0,
+                exploreCards = state.exploreCards,
+                isLoadingExplore = state.isLoadingExplore,
+                searchingCategoryKey = state.openRequestCategory,
                 isLoading = isFindingBuddy,
-                onRequest = { category ->
-                    // Espejo de submitHelpFromHome (iOS):
-                    // buddy activo → seguir la conversación; pioneer con destino →
-                    // trip + solicitud y a "Tu trip"; pioneer sin destino pero con
-                    // GPS → pioneerHelpFlow; sin nada → registro de trip.
-                    val isPioneer = state.communityContext?.totalBuddies == 0
-                    val activeMatchId = state.activeMatchId
-                    when {
-                        // Buddy asignado: la intención va como card al chat existente
-                        // (espejo de checkStatus en iOS: match activo → chat directo
-                        // con chosenCategory → category_card como primer mensaje).
-                        activeMatchId != null -> onOpenChat(activeMatchId, category)
-                        state.activeBuddyName != null -> onOpenConexiones()
-                        // Pioneer: sin buddies no hay nada que buscar — registra
-                        // trip + solicitud en silencio y navega a "Tu trip" (iOS).
-                        isPioneer && (state.destinationId != null || state.userLat != null) ->
-                            matchingViewModel.pioneerRegister(
-                                destinationId = state.destinationId,
-                                lat = state.userLat, lng = state.userLng,
-                                category = category,
-                                cityName = state.destinationName,
-                                onDone = onOpenTrips,
-                            )
-                        state.destinationId != null ->
-                            matchingViewModel.findBuddy(state.destinationId!!, category)
-                        else -> onOpenTrips()   // sin ubicación: registrar trip a mano (como iOS)
-                    }
+                topSpacing = hasHeaderRow,
+                onOpenPlace = onOpenPlace,
+                onOpenBuddyChat = {
+                    // Con buddy asignado el CTA no empieza nada nuevo: retoma el
+                    // hilo que ya existe.
+                    state.activeMatchId?.let { onOpenChat(it, null) } ?: onOpenConexiones()
                 },
+                onStartConversation = { mostrarIntenciones = true },
             )
+
+            // Selección de intención. En iOS esto vive DENTRO de la conversación
+            // (ContactarBuddyView con startsConversation); acá sigue siendo la
+            // hoja de categorías que Android ya tenía. Lo que sí queda igual es
+            // el punto de entrada: un solo CTA, no una grilla en la pantalla.
+            if (mostrarIntenciones) {
+                BuddySheet(onDismiss = { mostrarIntenciones = false }) {
+                    CategoryPickerView(
+                        buddyCount = state.communityContext?.buddies ?: 0,
+                        destinationName = state.destinationName,
+                        onRequest = { category, _ ->
+                            mostrarIntenciones = false
+                            solicitarAyuda(category)
+                        },
+                        modifier = Modifier.height(560.dp),
+                    )
+                }
+            }
             Spacer(Modifier.height(Spacing.md))
 
-            // ── Assigned buddy card (if active match) ────────────────────────
+            // ── Assigned buddy card (if active match) — solo si el trip
+            // elegido en el selector es el que tiene el match ─────────────
             val activeBuddy = state.activeBuddyName
-            if (activeBuddy != null) {
+            if (selectedIsActiveTrip && activeBuddy != null) {
                 AssignedBuddyCard(
                     buddyName = activeBuddy,
                     buddyAvatarUrl = state.activeBuddyAvatarUrl,
@@ -210,7 +298,7 @@ fun InicioScreen(
 
             // "¿Vas a viajar?" solo sin trip — con uno vivo, el registro ya
             // ocurrió y la card es ruido (mismo criterio en iOS).
-            if (state.activeJourney == null) {
+            if (state.liveJourneys.isEmpty()) {
                 RegisterCtaCard(onTap = onOpenTrips)
             }
         }
@@ -291,17 +379,105 @@ private fun LocationContext(city: String?, onRequestPermission: () -> Unit) {
     }
 }
 
+/** Una fila seleccionable del dropdown: un trip vivo (journey.id + nombre a mostrar). */
+private data class HomeContextTripOption(val id: String, val name: String)
+
+// ── Home context selector — "Ubicación actual" vs Mi(s) viaje(s) ──────────
+// Interactivo solo cuando hay 2+ opciones distintas (Ubicación actual + uno o
+// más trips) — con una sola opción se muestra como fila fija, sin affordance
+// de tap. Con 2+ trips vivos, cada uno aparece como su propia fila: no hay un
+// solo "Mi viaje" genérico si el viajero tiene más de un trip. Espejo de
+// HomeContextSelector (iOS).
+@Composable
+private fun HomeContextSelector(
+    context: HomeContext,
+    hasCurrentLocation: Boolean,
+    currentLocationCity: String?,
+    trips: List<HomeContextTripOption>,
+    onSelect: (HomeContext) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val interactive = (if (hasCurrentLocation) 1 else 0) + trips.size > 1
+    val icon = if (context is HomeContext.CurrentLocation) Icons.Filled.LocationOn else Icons.Filled.Map
+    val label = when (context) {
+        is HomeContext.CurrentLocation -> currentLocationCity.takeUnless { it.isNullOrEmpty() } ?: "Ubicación actual"
+        is HomeContext.Trip -> trips.firstOrNull { it.id == context.journeyId }?.name ?: "Mi trip"
+    }
+
+    Box {
+        Row(
+            modifier = if (interactive) Modifier.clickable { expanded = true } else Modifier,
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(icon, contentDescription = null, Modifier.size(12.dp), tint = BuddyColor.Brand)
+            Text(
+                label,
+                style = BuddyType.Caption1.copy(fontWeight = FontWeight.SemiBold),
+                color = BuddyColor.Brand,
+                maxLines = 1,
+                softWrap = false,
+            )
+            if (interactive) {
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, Modifier.size(14.dp), tint = BuddyColor.InkMuted)
+            }
+        }
+        if (interactive) {
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                if (hasCurrentLocation) {
+                    DropdownMenuItem(
+                        text = {
+                            HomeContextOptionRow(
+                                title = currentLocationCity.takeUnless { it.isNullOrEmpty() } ?: "Ubicación actual",
+                                subtitle = "Ubicación actual",
+                                checked = context is HomeContext.CurrentLocation,
+                            )
+                        },
+                        onClick = { onSelect(HomeContext.CurrentLocation); expanded = false },
+                    )
+                }
+                trips.forEachIndexed { index, trip ->
+                    if (hasCurrentLocation || index > 0) HorizontalDivider()
+                    DropdownMenuItem(
+                        text = {
+                            HomeContextOptionRow(
+                                title = trip.name,
+                                subtitle = "Mi trip",
+                                checked = context is HomeContext.Trip && context.journeyId == trip.id,
+                            )
+                        },
+                        onClick = { onSelect(HomeContext.Trip(trip.id)); expanded = false },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** El nombre real del lugar (trip o ubicación) va como texto principal —
+ * "Mi viaje"/"Ubicación actual" queda de subtítulo, no al revés. */
+@Composable
+private fun HomeContextOptionRow(title: String, subtitle: String, checked: Boolean) {
+    Column {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (checked) Icon(Icons.Filled.Check, contentDescription = null, Modifier.size(14.dp), tint = BuddyColor.Brand)
+            Text(title, style = BuddyType.Body)
+        }
+        Text(subtitle, style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+    }
+}
+
 // ── CategoryPicker — espejo completo de CategoryPickerView (iOS) ──────────
 
 private data class BuddyCategory(val icon: ImageVector, val label: String, val subtitle: String, val apiKey: String)
 
 private val categories = listOf(
-    BuddyCategory(Icons.Filled.Map, "Cómo llegar", "Rutas y transporte", "transport"),
-    BuddyCategory(Icons.Filled.Coffee, "Comer", "Comida y restaurantes", "food"),
-    BuddyCategory(Icons.AutoMirrored.Filled.Chat, "Traducir", "Frases, señales y más", "translation"),
-    BuddyCategory(Icons.Filled.AutoAwesome, "Qué hacer", "Tours y actividades", "activities"),
-    BuddyCategory(Icons.Filled.Bed, "Alojamiento", "Hoteles, hostales y más", "accommodation"),
-    BuddyCategory(Icons.Filled.Shield, "Seguridad", "Emergencias y consejos útiles", "emergency"),
+    BuddyCategory(Icons.Filled.DirectionsCar, "Transporte", "Rutas y movilidad", "transport"),
+    BuddyCategory(Icons.Filled.Coffee, "Comer", "Restaurantes y sabores locales", "food"),
+    BuddyCategory(Icons.Filled.ShoppingBag, "Compras", "Productos locales", "shopping"),
+    BuddyCategory(Icons.Filled.Hiking, "Actividades", "Tours y experiencias", "activities"),
+    BuddyCategory(Icons.Filled.Bed, "Alojamiento", "Hoteles y hospedajes", "accommodation"),
+    BuddyCategory(Icons.Filled.Lightbulb, "Consejos", "Recomendaciones", "recommendations"),
 )
 
 /** Texto bajo el título del CTA — mismas frases exactas que iOS. */
@@ -320,20 +496,47 @@ private fun availabilityText(ctx: ApiPlaceContext?, activeBuddyName: String?): S
     return "Todavía no hay buddies aquí. Sé el primero en explorar."
 }
 
+/**
+ * El composer del Home — espejo de CategoryPickerView con hidesCategoryGrid
+ * (iOS).
+ *
+ * La grilla de 6 categorías dejó de ser un componente de Home: ahí las
+ * intenciones ya no se eligen primero, nacen dentro de la conversación. En su
+ * lugar va el carrusel de lugares que recomiendan los buddies y, debajo, el CTA
+ * que abre el hilo. Si todavía no hay fotos para este lugar, solo el CTA —
+ * nunca la grilla.
+ */
 @Composable
 private fun CategoryPicker(
     destinationName: String?,
     communityContext: ApiPlaceContext?,
     activeBuddyName: String?,
     activeBuddyAvatarUrl: String?,
+    activeBuddySubtitle: String?,
+    activeBuddyHasUnread: Boolean,
+    exploreCards: List<ApiPlaceCard>,
+    isLoadingExplore: Boolean,
+    searchingCategoryKey: String?,
     isLoading: Boolean,
-    onRequest: (String) -> Unit,
+    /** false cuando ya hay algo pintado arriba (selector/LocationContext) —
+     * evita sumar este Spacer al Spacer de arriba de la pantalla y dejar un
+     * espacio doble encima del heading. */
+    topSpacing: Boolean = true,
+    onOpenPlace: (ApiPlaceCard) -> Unit,
+    onOpenBuddyChat: () -> Unit,
+    onStartConversation: () -> Unit,
 ) {
     val noBuddies = activeBuddyName == null &&
         (communityContext?.let { it.buddies <= 0 && it.totalBuddies <= 0 } ?: true)
 
+    // El esqueleto cuenta como carrusel: sin esto la línea de disponibilidad se
+    // dibuja ARRIBA (su lugar cuando no hay fotos) y empuja las cards hacia
+    // abajo, así que al cargar todo el bloque salta. Lo que se promete y lo que
+    // llega deben ocupar el mismo espacio.
+    val showsCarousel = exploreCards.isNotEmpty() || isLoadingExplore
+
     Column {
-        Spacer(Modifier.height(Spacing.md))
+        if (topSpacing) Spacer(Modifier.height(Spacing.md))
         // Hero heading
         Text(
             buildAnnotatedString {
@@ -343,34 +546,105 @@ private fun CategoryPicker(
             style = BuddyType.DisplayLarge,
         )
         Spacer(Modifier.height(6.dp))
+        // Con carrusel el subtítulo DESCRIBE lo que se ve; sin él sigue mandando
+        // a elegir un tema. El viejo ("Elige el tema de tu consulta") venía del
+        // flujo de 6 categorías: sobre el carrusel mandaba a elegir y lo único
+        // elegible a la vista eran las fotos.
         Text(
             buildAnnotatedString {
-                withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append("Cuéntanos qué necesitas. Te conectaremos con un buddy") }
-                if (destinationName != null) {
-                    withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append(" de ") }
-                    withStyle(SpanStyle(color = BuddyColor.Brand, fontWeight = FontWeight.SemiBold)) { append(destinationName) }
+                if (showsCarousel) {
+                    withStyle(SpanStyle(color = BuddyColor.InkMuted)) {
+                        append("Lugares que recomiendan los buddies")
+                    }
+                    if (destinationName != null) {
+                        withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append(" de ") }
+                        withStyle(SpanStyle(color = BuddyColor.Brand, fontWeight = FontWeight.SemiBold)) {
+                            append(destinationName)
+                        }
+                    } else {
+                        withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append(" por acá") }
+                    }
+                    withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append(".") }
+                } else {
+                    withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append("Elige el tema de tu consulta. Te conectaremos con una persona que conozca") }
+                    if (destinationName != null) {
+                        withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append(" ") }
+                        withStyle(SpanStyle(color = BuddyColor.Brand, fontWeight = FontWeight.SemiBold)) { append(destinationName) }
+                    } else {
+                        withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append(" el lugar") }
+                    }
+                    withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append(".") }
                 }
-                withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append(".") }
             },
             style = BuddyType.Callout,
         )
-        Spacer(Modifier.height(Spacing.lg))
 
-        // Grid 2×3 — icon square + title + subtitle (estilo exacto iOS)
-        // Tapping a category directly triggers the help request flow
-        categories.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                row.forEach { cat ->
-                    CategoryCell(
-                        category = cat,
-                        onTap = { onRequest(cat.apiKey) },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
+        // Disponibilidad de la comunidad. Con carrusel va DEBAJO de las fotos
+        // (ver más abajo): ahí deja de ser una estadística suelta y pasa a
+        // explicar qué son esas fotos y por qué llevan al botón.
+        if (activeBuddyName == null && !showsCarousel) {
+            Spacer(Modifier.height(2.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(if (noBuddies) BuddyColor.InkFaint else BuddyColor.Accent),
+                )
+                Text(
+                    availabilityText(communityContext, activeBuddyName),
+                    style = BuddyType.Caption1,
+                    color = BuddyColor.InkMuted,
+                )
             }
-            Spacer(Modifier.height(12.dp))
         }
+
+        Spacer(Modifier.height(Spacing.md))
+
+        if (showsCarousel) {
+            // Sangra hasta el borde de la pantalla, como en iOS: el peek
+            // lateral de las cards vecinas es parte del efecto.
+            ExploreCarousel(
+                cards = exploreCards,
+                isSkeleton = exploreCards.isEmpty() && isLoadingExplore,
+                onOpenPlace = onOpenPlace,
+                modifier = Modifier.sangraLateral(Spacing.edge),
+            )
+            Spacer(Modifier.height(12.dp))
+            // La bisagra entre las fotos y el CTA: nombra la ciudad y la
+            // disponibilidad en la misma frase, para encadenar lugar → persona
+            // → consulta.
+            Text(
+                exploreAvailabilityText(communityContext, destinationName),
+                style = BuddyType.Caption1,
+                color = BuddyColor.InkMuted,
+            )
+            Spacer(Modifier.height(16.dp))
+        }
+
+        ConsultCta(
+            destinationName = destinationName,
+            activeBuddyName = activeBuddyName,
+            activeBuddyAvatarUrl = activeBuddyAvatarUrl,
+            activeBuddySubtitle = activeBuddySubtitle,
+            activeBuddyHasUnread = activeBuddyHasUnread,
+            searchingCategoryKey = searchingCategoryKey,
+            onOpenBuddyChat = onOpenBuddyChat,
+            onStartConversation = onStartConversation,
+        )
     }
+}
+
+/** Espejo de exploreAvailabilityText (iOS). */
+private fun exploreAvailabilityText(ctx: ApiPlaceContext?, destinationName: String?): String {
+    val city = destinationName ?: "este lugar"
+    val n = ctx?.buddies ?: 0
+    if (n <= 0) return "Buscando buddies que conozcan $city"
+    return if (n == 1) "1 buddy conoce $city y está disponible ahora"
+    else "$n buddies conocen $city y están disponibles ahora"
 }
 
 @Composable
@@ -713,10 +987,12 @@ private fun MatchingSheet(
                     val categoryLabel = when (searchState.category) {
                         "transport" -> "Transporte"
                         "accommodation" -> "Alojamiento"
-                        "food" -> "Comida"
+                        "food" -> "Comer"
+                        "shopping" -> "Compras"
                         "translation" -> "Traducir"
-                        "activities" -> "Qué hacer"
+                        "activities" -> "Actividades"
                         "emergency" -> "Seguridad"
+                        "recommendations" -> "Consejos"
                         else -> "Ayuda"
                     }
                     BuddyLoading(Modifier.height(60.dp))

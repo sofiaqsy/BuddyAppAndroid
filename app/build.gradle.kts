@@ -26,7 +26,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 3
-        versionName = "1.0.0"
+        versionName = "1.0.2"
 
         buildConfigField("String", "API_BASE_URL", "\"https://buddy-core-504b393f8333.herokuapp.com/v1/\"")
         // Client "Buddy App Web" (tipo Aplicación web) del proyecto BuddyApp —

@@ -137,6 +137,27 @@ fun BuddyRoot() {
                     openChatCategory = category
                     openChatId = matchId
                 },
+                // El mapa del destino al que pertenece el lugar — el mismo que
+                // abre un trip. Sin destination_id no hay guía que abrir y el
+                // tap no hace nada, igual que en iOS.
+                onOpenPlace = { card ->
+                    val destId = card.destinationId
+                    if (destId != null) {
+                        mapJourney = com.buddy.app.core.data.model.ApiJourney(
+                            id = card.id,
+                            title = card.destinationName ?: card.name,
+                            status = "active",
+                            destination = com.buddy.app.core.data.model.ApiDestinationRef(
+                                id = destId,
+                                name = card.destinationName ?: card.name,
+                                city = card.destinationName ?: card.name,
+                                lat = card.lat,
+                                lng = card.lng,
+                            ),
+                            destinationId = destId,
+                        )
+                    }
+                },
             )
             AppTab.Trips -> TripsScreen(
                 modifier,

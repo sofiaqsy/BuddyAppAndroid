@@ -47,6 +47,20 @@ interface HomeApi {
     @GET("travelers/me/journeys")
     suspend fun myJourneys(): List<ApiJourney>
 
+    /**
+     * GET /feed/place-shares — lugares de por aquí que la comunidad documentó.
+     *
+     * Sección aparte de /feed/stories a propósito: un viaje es una narración y
+     * un lugar es una referencia sobre un sitio concreto. Es un carrusel, así
+     * que no lleva cursor.
+     */
+    @GET("feed/place-shares")
+    suspend fun placeShares(
+        @Query("limit") limit: Int = 12,
+        @Query("lat") lat: Double? = null,
+        @Query("lng") lng: Double? = null,
+    ): com.buddy.app.core.data.model.ApiPlaceCardsResponse
+
     @GET("search/places")
     suspend fun searchPlaces(@Query("q") query: String): SearchResponse
 

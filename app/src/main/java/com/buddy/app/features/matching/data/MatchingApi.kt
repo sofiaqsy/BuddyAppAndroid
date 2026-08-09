@@ -35,6 +35,17 @@ interface MatchingApi {
     @GET("matching/matches")
     suspend fun matches(): List<ApiMatch>
 
+    /**
+     * GET /matching/my-request — mi solicitud abierta, si la hay.
+     *
+     * Sin destino en la ruta a propósito: la búsqueda puede haber empezado en
+     * otra pantalla (el mapa, por ejemplo) y el Home tiene que enterarse igual.
+     * Responde 200 con `null` cuando no hay ninguna — "no tienes solicitud" es
+     * una respuesta, no un error. De ahí Response<> en vez del tipo desnudo.
+     */
+    @GET("matching/my-request")
+    suspend fun myRequest(): retrofit2.Response<ApiHelpRequest>
+
     @GET("matching/my-offers")
     suspend fun myOffers(): List<ApiBuddyOffer>
 
