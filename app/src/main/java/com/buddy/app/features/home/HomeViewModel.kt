@@ -45,6 +45,7 @@ sealed interface HomeContext {
 class HomeViewModel @Inject constructor(
     private val api: HomeApi,
     private val matchingApi: com.buddy.app.features.matching.data.MatchingApi,
+    private val matchingRepo: com.buddy.app.features.matching.data.MatchingRepository,
     private val travelerRepo: TravelerRepository,
     private val locationProvider: LocationProvider,
     private val sessionStore: com.buddy.app.core.data.SessionStore,
@@ -247,7 +248,7 @@ class HomeViewModel @Inject constructor(
      * CTA — sin esto el Home invita a empezar una búsqueda que ya está viva.
      */
     private suspend fun refreshOpenRequest() {
-        runCatching { matchingApi.myRequest().body() }
+        runCatching { matchingRepo.myRequest() }
             .onSuccess { req ->
                 Log.d(TAG, "openRequest → ${req?.category ?: "ninguna"}")
                 _state.update { it.copy(openRequestCategory = req?.category) }

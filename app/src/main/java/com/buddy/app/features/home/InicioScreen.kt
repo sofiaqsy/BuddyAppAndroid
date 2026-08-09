@@ -82,6 +82,7 @@ import com.buddy.app.core.designsystem.components.BuddyPrimaryButton
 import com.buddy.app.core.designsystem.components.BuddySheet
 import com.buddy.app.core.designsystem.components.BuddyTextButton
 import com.buddy.app.features.matching.MatchingViewModel
+import com.buddy.app.features.messages.ChatScreen
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.temporal.ChronoUnit
@@ -129,6 +130,8 @@ fun InicioScreen(
     val isFindingBuddy = searchState is MatchingViewModel.SearchState.Searching || isPioneerRegistering
 
     var mostrarIntenciones by remember { mutableStateOf(false) }
+    /** Tema elegido dentro de la conversación. Null = todavía se está eligiendo. */
+    var categoriaEnConversacion by remember { mutableStateOf<String?>(null) }
 
     /**
      * Espejo de submitHelpFromHome (iOS), con el contexto explícito del selector
@@ -246,7 +249,14 @@ fun InicioScreen(
                 communityContext = state.communityContext,
                 activeBuddyName = if (selectedIsActiveTrip) state.activeBuddyName else null,
                 activeBuddyAvatarUrl = if (selectedIsActiveTrip) state.activeBuddyAvatarUrl else null,
-                activeBuddySubtitle = if (selectedIsActiveTrip) state.lastBuddyMessage else null,
+                // "Tú:" cuando el último mensaje es mío — misma convención que
+                // WhatsApp y que la lista de Conexiones. Sin él, leer "Cafetería
+                // Rosal" da a entender que lo mandó el buddy.
+                activeBuddySubtitle = if (selectedIsActiveTrip) {
+                    state.lastBuddyMessage?.let {
+                        if (state.isLastMessageFromMe) "Tú: $it" else it
+                    }
+                } else null,
                 activeBuddyHasUnread = selectedIsActiveTrip && state.unreadMessageCount > 0,
                 exploreCards = state.exploreCards,
                 isLoadingExplore = state.isLoadingExplore,
@@ -262,45 +272,89 @@ fun InicioScreen(
                 onStartConversation = { mostrarIntenciones = true },
             )
 
-            // Selección de intención. En iOS esto vive DENTRO de la conversación
-            // (ContactarBuddyView con startsConversation); acá sigue siendo la
-            // hoja de categorías que Android ya tenía. Lo que sí queda igual es
-            // el punto de entrada: un solo CTA, no una grilla en la pantalla.
+            // La intención se elige DENTRO de la conversación, no en una hoja
+            // de formulario: pedir ayuda deja de ser una pantalla que se
+            // completa y pasa a ser un hilo que se inicia. Igual que iOS.
+            // UNA sola hoja para todo el recorrido, igual que iOS.
+            //
+            // El contenido se REEMPLAZA según el estado —elegir tema, buscando,
+            // y el chat real cuando alguien acepta— en vez de abrir una pantalla
+            // nueva en cada paso. Esa es la idea entera: no son tres momentos
+            // distintos, es la misma conversación que va avanzando. Android
+            // apilaba una segunda hoja encima (MatchingSheet) y luego navegaba
+            // a otra pantalla para el chat.
             if (mostrarIntenciones) {
-                BuddySheet(onDismiss = { mostrarIntenciones = false }) {
-                    CategoryPickerView(
-                        buddyCount = state.communityContext?.buddies ?: 0,
-                        destinationName = state.destinationName,
-                        onRequest = { category, _ ->
-                            mostrarIntenciones = false
-                            solicitarAyuda(category)
-                        },
-                        modifier = Modifier.height(560.dp),
-                    )
+                val emparejado = searchState as? MatchingViewModel.SearchState.Matched
+                BuddySheet(
+                    onDismiss = {
+                        // Cerrar mientras busca cancela la búsqueda: dejarla viva
+                        // sin nada en pantalla que lo diga sería peor.
+                        if (searchState is MatchingViewModel.SearchState.Searching) {
+                            matchingViewModel.cancelSearch()
+                        }
+                        mostrarIntenciones = false
+                        categoriaEnConversacion = null
+                    },
+                    fullHeight = true,
+                ) {
+                    if (emparejado != null) {
+                        // Un buddy aceptó: la misma hoja pasa a ser el chat.
+                        ChatScreen(
+                            matchId = emparejado.matchId,
+                            title = emparejado.buddy?.fullName?.split(" ")?.firstOrNull() ?: "Chat",
+                            initialCategory = emparejado.category,
+                            onBack = {
+                                matchingViewModel.dismiss()
+                                mostrarIntenciones = false
+                                categoriaEnConversacion = null
+                                viewModel.refreshTripState()
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        ConversacionPendiente(
+                            destinationName = state.destinationName,
+                            // El tema sale del estado de búsqueda cuando existe:
+                            // así sobrevive a una recomposición y al reintento.
+                            categoriaElegida = (searchState as? MatchingViewModel.SearchState.Searching)?.category
+                                ?: categoriaEnConversacion,
+                            buscando = isFindingBuddy,
+                            onElegirCategoria = { category ->
+                                // La categoría se queda visible en el hilo
+                                // mientras arranca la búsqueda: es lo que el
+                                // usuario ya dijo.
+                                categoriaEnConversacion = category
+                                solicitarAyuda(category)
+                            },
+                            onBack = {
+                                if (searchState is MatchingViewModel.SearchState.Searching) {
+                                    matchingViewModel.cancelSearch()
+                                }
+                                mostrarIntenciones = false
+                                categoriaEnConversacion = null
+                            },
+                            // fillMaxSize y no una altura fija: es una pantalla,
+                            // y 620dp se quedaba corto o largo según el teléfono.
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
             }
             Spacer(Modifier.height(Spacing.md))
 
-            // ── Assigned buddy card (if active match) — solo si el trip
-            // elegido en el selector es el que tiene el match ─────────────
-            val activeBuddy = state.activeBuddyName
-            if (selectedIsActiveTrip && activeBuddy != null) {
-                AssignedBuddyCard(
-                    buddyName = activeBuddy,
-                    buddyAvatarUrl = state.activeBuddyAvatarUrl,
-                    lastMessage = state.lastBuddyMessage,
-                    isLastFromMe = state.isLastMessageFromMe,
-                    unreadCount = state.unreadMessageCount,
-                    onTap = { state.activeMatchId?.let { onOpenChat(it, null) } },
-                )
-                Spacer(Modifier.height(Spacing.md))
-            }
+            // Aquí iba una segunda card de "buddy asignado". Se quitó: el CTA
+            // de arriba ya ES esa card cuando hay match — avatar, nombre,
+            // último mensaje y punto de no leídos—, así que la pantalla decía
+            // dos veces lo mismo, una debajo de la otra.
+            //
+            // Ese es el sentido de que el CTA tenga una sola forma para los
+            // tres momentos: no lo reemplaza otra cosa cuando aparece el buddy,
+            // se va llenando. iOS quitó su equivalente por lo mismo.
 
-            // "¿Vas a viajar?" solo sin trip — con uno vivo, el registro ya
-            // ocurrió y la card es ruido (mismo criterio en iOS).
-            if (state.liveJourneys.isEmpty()) {
-                RegisterCtaCard(onTap = onOpenTrips)
-            }
+            // Aquí iba "¿Vas a viajar?". Retirada: iOS ya la oculta en todos
+            // los casos. El Home pide una cosa —consultar con un buddy— y una
+            // segunda invitación a registrar un viaje competía con ella justo
+            // debajo, en el momento en que el usuario ya decidió qué hacer.
         }
 
         // Loader — cápsula con spinner mientras se registra la solicitud
@@ -346,7 +400,12 @@ fun InicioScreen(
         Spacer(Modifier.height(100.dp))
     }
 
-    MatchingSheet(searchState, matchingViewModel, onOpenChat, onOpenConexiones)
+    // Solo cuando la búsqueda arrancó FUERA de la conversación (una categoría
+    // tocada desde otro sitio). Con la hoja abierta, el estado ya se está
+    // contando dentro de ella: dos hojas superpuestas diciendo lo mismo.
+    if (!mostrarIntenciones) {
+        MatchingSheet(searchState, matchingViewModel, onOpenChat, onOpenConexiones)
+    }
 }
 
 // ── Location context — "Estás en X" / activar ubicación ───────────────────
@@ -613,7 +672,7 @@ private fun CategoryPicker(
                 onOpenPlace = onOpenPlace,
                 modifier = Modifier.sangraLateral(Spacing.edge),
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(6.dp))
             // La bisagra entre las fotos y el CTA: nombra la ciudad y la
             // disponibilidad en la misma frase, para encadenar lugar → persona
             // → consulta.
@@ -688,143 +747,6 @@ private fun CategoryCell(
 }
 
 // ── Assigned Buddy Card ────────────────────────────────────────────────────
-@Composable
-private fun AssignedBuddyCard(
-    buddyName: String,
-    buddyAvatarUrl: String?,
-    onTap: () -> Unit,
-    modifier: Modifier = Modifier,
-    lastMessage: String? = null,
-    isLastFromMe: Boolean = false,
-    unreadCount: Int = 0,
-) {
-    val shape = RoundedCornerShape(Radius.md)
-    Row(
-        modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(BuddyColor.Surface)
-            .border(1.5.dp, BuddyColor.Brand.copy(alpha = 0.25f), shape)
-            .clickable(onClick = onTap)
-            .padding(horizontal = Spacing.md, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
-    ) {
-        Box {
-            Box(
-                Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(BuddyColor.SurfaceRaised),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (!buddyAvatarUrl.isNullOrEmpty()) {
-                    AsyncImage(
-                        model = buddyAvatarUrl,
-                        contentDescription = buddyName,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape),
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = null,
-                        tint = BuddyColor.InkMuted,
-                        modifier = Modifier.size(22.dp),
-                    )
-                }
-            }
-            if (unreadCount > 0) {
-                Box(
-                    Modifier
-                        .size(20.dp)
-                        .background(BuddyColor.ErrorRed, CircleShape)
-                        .align(Alignment.TopEnd),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        "$unreadCount",
-                        style = BuddyType.Caption1.copy(fontWeight = FontWeight.Bold, fontSize = 12.sp),
-                        color = Color.White,
-                    )
-                }
-            }
-        }
-
-        Column(
-            Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            Text(
-                buildAnnotatedString {
-                    withStyle(SpanStyle(color = BuddyColor.InkMuted, fontSize = 12.sp)) {
-                        append("Tu buddy asignado ")
-                    }
-                    withStyle(SpanStyle(color = BuddyColor.Ink, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)) {
-                        append(buddyName)
-                    }
-                },
-                maxLines = 1,
-            )
-            if (!lastMessage.isNullOrEmpty()) {
-                Text(
-                    if (isLastFromMe) "Tú: $lastMessage" else lastMessage,
-                    style = BuddyType.Caption1,
-                    color = BuddyColor.InkMuted,
-                    maxLines = 1,
-                )
-            }
-        }
-
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-            contentDescription = null,
-            tint = BuddyColor.Brand,
-            modifier = Modifier.size(18.dp),
-        )
-    }
-}
-
-// ── Register CTA — "¿Vas a viajar?" ────────────────────────────────────────
-@Composable
-private fun RegisterCtaCard(onTap: () -> Unit) {
-    val shape = RoundedCornerShape(Radius.lg)
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(shape)
-            .background(BuddyColor.Surface)
-            .border(1.dp, BuddyColor.Border, shape)
-            .clickable(onClick = onTap)
-            .padding(horizontal = Spacing.md, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.md),
-    ) {
-        Box(
-            Modifier.size(40.dp).background(BuddyColor.GroupedBg, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Filled.Map, contentDescription = null, Modifier.size(16.dp), tint = BuddyColor.Brand)
-        }
-        Column(Modifier.weight(1f)) {
-            Text("¿Vas a viajar?", style = BuddyType.FootnoteBold, color = BuddyColor.Ink)
-            Text(
-                "Regístralo y prepara tu llegada para aprovechar al máximo.",
-                style = BuddyType.Caption1, color = BuddyColor.InkMuted,
-            )
-        }
-        Icon(
-            Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null,
-            tint = BuddyColor.InkMuted.copy(alpha = 0.5f),
-        )
-    }
-}
-
-// ── Historias de viajeros — carrusel + scrim + dots + footer ──────────────
 @Composable
 private fun CommunitySection(
     stories: List<ApiJourney>,

@@ -26,6 +26,22 @@ class MatchingRepository @Inject constructor(
     private val api: MatchingApi,
     private val sse: SseClient,
 ) {
+    /**
+     * Mi solicitud abierta, o null si no tengo ninguna.
+     *
+     * El endpoint responde 200 con el cuerpo literal `null`, que kotlinx no
+     * puede decodificar contra un tipo no nulo (ver MatchingApi.myRequestRaw).
+     * Se lee el texto y se decide aquí: "null" o vacío es una respuesta
+     * legítima, no un fallo.
+     */
+    suspend fun myRequest(): ApiHelpRequest? {
+        val resp = api.myRequestRaw()
+        if (!resp.isSuccessful) throw retrofit2.HttpException(resp)
+        val texto = resp.body()?.string()?.trim().orEmpty()
+        if (texto.isEmpty() || texto == "null") return null
+        return Json { ignoreUnknownKeys = true }.decodeFromString(texto)
+    }
+
     suspend fun createHelpRequest(destinationId: String?, category: String, description: String? = null, journeyId: String? = null): ApiHelpRequest =
         try {
             api.createHelpRequest(HelpRequestBody(destinationId, category, description, journeyId))

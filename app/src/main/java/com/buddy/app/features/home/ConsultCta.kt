@@ -73,7 +73,11 @@ fun ConsultCta(
             .background(BuddyColor.Surface)
             .border(1.dp, BuddyColor.Border, RoundedCornerShape(Radius.sm))
             .clickable { if (activeBuddyName != null) onOpenBuddyChat() else onStartConversation() }
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            // 13 y no 10: +10% de alto, pedido de diseño. Lo más alto de la
+            // fila es el avatar (34dp), así que medía 34 + 10·2 = 54; con 13
+            // pasa a 60. Padding y no una altura fija, para que la fila siga
+            // creciendo sola si el subtítulo se va a dos líneas.
+            .padding(horizontal = 16.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {

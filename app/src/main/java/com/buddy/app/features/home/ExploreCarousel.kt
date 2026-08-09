@@ -75,8 +75,11 @@ private val ScaleFalloff = 160.dp
 /** Aire vertical que la fila reserva ARRIBA Y ABAJO para que la card escalada
  *  no se recorte. scale no altera el layout, así que la fila mide CardHeight y
  *  la central —un 22% más alta— se sale por los dos lados: hay que sumarlo dos
- *  veces, no una. Con una sola la tarjeta salía cortada. */
-private val VerticalSlack = CardHeight * ScaleDelta / 2 + 8.dp
+ *  veces, no una. Con una sola la tarjeta salía cortada.
+ *
+ *  Exactamente lo que desborda y 2dp de margen. Antes eran 8 de propina y se
+ *  veían como un hueco bajo las fotos. */
+private val VerticalSlack = CardHeight * ScaleDelta / 2 + 2.dp
 
 private val CardSpacing = 10.dp
 
@@ -150,15 +153,38 @@ fun ExploreCarousel(
         // z-order desactualizado durante todo el arrastre.
         val centerIndex by remember {
             derivedStateOf {
-                listState.layoutInfo.visibleItemsInfo.minByOrNull {
-                    abs((it.offset + it.size / 2f) - viewportCenterPx)
+                val info = listState.layoutInfo
+                info.visibleItemsInfo.minByOrNull {
+                    abs(centroDe(it, info) - viewportCenterPx)
                 }?.index ?: 0
             }
         }
 
-        // TEMPORAL — quitar antes de publicar. Dice qué card cree el carrusel
-        // que está centrada y con qué escala dibuja cada una: es la única forma
-        // de distinguir "el cálculo está mal" de "el cálculo va tarde".
+        // TEMPORAL — quitar antes de publicar.
+        //
+        // EN REPOSO, que es el estado que importa: el log anterior solo saltaba
+        // al cambiar centerIndex, o sea a media pasada del dedo, y nunca decía
+        // dónde queda el carrusel cuando se detiene — que es justo donde la
+        // card grande sale en el sitio equivocado.
+        androidx.compose.runtime.LaunchedEffect(listState) {
+            androidx.compose.runtime.snapshotFlow { listState.isScrollInProgress }
+                .collect { moviendose ->
+                    if (moviendose) return@collect
+                    val info = listState.layoutInfo
+                    val vis = info.visibleItemsInfo.map { i ->
+                        val mid = centroDe(i, info)
+                        val s = 1f + (1f - min(abs(mid - viewportCenterPx) / falloffPx, 1f)) * ScaleDelta
+                        "[${i.index}] off=${i.offset} size=${i.size} mid=${mid.toInt()} d=${(mid - viewportCenterPx).toInt()} scale=${"%.2f".format(s)}"
+                    }
+                    android.util.Log.d(
+                        "ExploreCarousel",
+                        "REPOSO centro=$centerIndex ancho=${maxWidth} inset=$sideInset viewportCenter=${viewportCenterPx.toInt()} " +
+                        "viewportPx=${info.viewportSize.width} beforeContent=${info.beforeContentPadding} afterContent=${info.afterContentPadding} " +
+                        "firstVisible=${listState.firstVisibleItemIndex}+${listState.firstVisibleItemScrollOffset} | ${vis.joinToString(" ")}"
+                    )
+                }
+        }
+
         androidx.compose.runtime.LaunchedEffect(centerIndex) {
             val vis = listState.layoutInfo.visibleItemsInfo.map { i ->
                 val mid = i.offset + i.size / 2f
@@ -180,6 +206,15 @@ fun ExploreCarousel(
             // que el zIndex y el tap necesitan saber.
             flingBehavior = rememberSnapFlingBehavior(listState),
             userScrollEnabled = !isSkeleton,
+            // CenterVertically y no el Top por defecto.
+            //
+            // La card crece un 22% alrededor de SU CENTRO. Alineada arriba, ese
+            // centro está a media altura de la card pero el aire reservado
+            // quedaba todo abajo: la parte de arriba se salía de la fila y se
+            // montaba sobre "Lugares que recomiendan los buddies de Lima".
+            // Centrada, el desbordamiento se reparte entre las dos holguras que
+            // la fila ya reserva.
+            verticalAlignment = Alignment.CenterVertically,
             // Aire vertical para que la card escalada no se recorte contra el
             // borde de la fila: scale no altera el layout, así que la fila
             // sigue midiendo CardHeight y la central se saldría por arriba.
@@ -201,10 +236,10 @@ fun ExploreCarousel(
                         // así que la card grande no era la del centro. Es el
                         // equivalente de visualEffect en iOS: render-only.
                         .graphicsLayer {
-                            val info = listState.layoutInfo.visibleItemsInfo
-                                .firstOrNull { it.index == index }
-                            val distance = info
-                                ?.let { abs((it.offset + it.size / 2f) - viewportCenterPx) }
+                            val info = listState.layoutInfo
+                            val item = info.visibleItemsInfo.firstOrNull { it.index == index }
+                            val distance = item
+                                ?.let { abs(centroDe(it, info) - viewportCenterPx) }
                                 ?: falloffPx
                             val s = 1f + (1f - min(distance / falloffPx, 1f)) * ScaleDelta
                             scaleX = s
@@ -226,6 +261,20 @@ fun ExploreCarousel(
         }
     }
 }
+
+/**
+ * Centro de una card DENTRO del viewport, en píxeles.
+ *
+ * `LazyListItemInfo.offset` NO incluye el contentPadding inicial: la primera
+ * card reporta offset=0 aunque se dibuje 502px más a la derecha. Sin sumar
+ * `beforeContentPadding`, todo el cálculo quedaba corrido exactamente un inset
+ * y la card que el código creía centrada aparecía pegada al borde derecho —
+ * en reposo la grande era la tercera, no la primera.
+ */
+private fun centroDe(
+    item: androidx.compose.foundation.lazy.LazyListItemInfo,
+    info: androidx.compose.foundation.lazy.LazyListLayoutInfo,
+): Float = item.offset + info.beforeContentPadding + item.size / 2f
 
 /**
  * Deja que el carrusel sangre hasta el borde de la pantalla aunque su
@@ -341,7 +390,7 @@ private fun ExploreCarouselCard(
             Modifier
                 .fillMaxWidth()
                 .height(70.dp)
-                .padding(horizontal = 10.dp, vertical = 7.dp),
+                .padding(horizontal = 10.dp, vertical = 5.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -355,7 +404,7 @@ private fun ExploreCarouselCard(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(3.dp))
+                Spacer(Modifier.height(1.dp))
             }
 
             // Tamaños fijos y no tokens: mezclar un estilo del sistema con dos
@@ -369,7 +418,7 @@ private fun ExploreCarouselCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(1.dp))
 
             // Quién recomienda el lugar, no cuánta gente lo conoce: la
             // recomendación de una persona concreta pesa más como prueba social

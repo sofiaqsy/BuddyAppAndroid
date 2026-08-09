@@ -40,11 +40,25 @@ interface MatchingApi {
      *
      * Sin destino en la ruta a propósito: la búsqueda puede haber empezado en
      * otra pantalla (el mapa, por ejemplo) y el Home tiene que enterarse igual.
-     * Responde 200 con `null` cuando no hay ninguna — "no tienes solicitud" es
-     * una respuesta, no un error. De ahí Response<> en vez del tipo desnudo.
+     * Responde 200 con el cuerpo `null` cuando no hay ninguna — "no tienes
+     * solicitud" es una respuesta, no un error.
+     *
+     * SE DEVUELVE EL CUERPO EN CRUDO A PROPÓSITO.
+     *
+     * Con `Response<ApiHelpRequest>` kotlinx recibe el literal `null` donde
+     * espera un objeto y lanza JsonDecodingException: cada arranque registraba
+     * "myRequest failed" y el estado de búsqueda del Home no funcionaba nunca
+     * — un fallo de red y "no tienes solicitud" acababan en la misma rama.
+     *
+     * Declararlo `ApiHelpRequest?` tampoco sirve: Retrofit elige el conversor
+     * por el `Type` de reflexión de Java, donde la nulabilidad de Kotlin no
+     * existe. iOS no sufre esto porque JSONDecoder mapea un `null` de primer
+     * nivel a un Optional sin ayuda.
+     *
+     * Lo parsea `MatchingRepository.myRequest()`.
      */
     @GET("matching/my-request")
-    suspend fun myRequest(): retrofit2.Response<ApiHelpRequest>
+    suspend fun myRequestRaw(): retrofit2.Response<okhttp3.ResponseBody>
 
     @GET("matching/my-offers")
     suspend fun myOffers(): List<ApiBuddyOffer>

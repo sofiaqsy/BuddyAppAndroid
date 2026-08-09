@@ -26,13 +26,27 @@ import com.buddy.app.core.designsystem.Spacing
 fun BuddySheet(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Abre a pantalla completa y sin paso intermedio.
+     *
+     *  Para contenido que ES una pantalla —una conversación, por ejemplo— y no
+     *  una hoja de opciones: a media altura se ve un trozo de chat asomando
+     *  desde abajo y hay que arrastrar para leerlo. skipPartiallyExpanded quita
+     *  ese estado intermedio, así que abre directamente entera. */
+    fullHeight: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(
+        skipPartiallyExpanded = fullHeight,
+    )
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         modifier = modifier,
+        sheetState = sheetState,
         shape = RoundedCornerShape(topStart = Radius.xl, topEnd = Radius.xl),
         containerColor = BuddyColor.Canvas,
+        // Sin el "agarre" cuando ocupa toda la pantalla: no hay a dónde
+        // arrastrarla, así que solo sería un adorno que promete un gesto.
+        dragHandle = if (fullHeight) null else { { androidx.compose.material3.BottomSheetDefaults.DragHandle() } },
         content = content,
     )
 }
