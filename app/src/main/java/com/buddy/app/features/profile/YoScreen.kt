@@ -258,6 +258,28 @@ fun YoScreen(
         )
     }
 
+    // La publicación ya volvió al grid cuando esto aparece. El aviso explica
+    // por qué reapareció: sin él, la vuelta se lee como un bug y el usuario
+    // intenta borrarla otra vez.
+    if (state.deletePublicationFailed) {
+        AlertDialog(
+            onDismissRequest = viewModel::dismissDeleteError,
+            containerColor = BuddyColor.Surface,
+            title = { Text("No se pudo eliminar", style = BuddyType.Headline, color = BuddyColor.Ink) },
+            text = {
+                Text(
+                    "La publicación sigue en tu perfil. Revisa tu conexión e inténtalo de nuevo.",
+                    style = BuddyType.Subhead, color = BuddyColor.InkMuted,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::dismissDeleteError) {
+                    Text("Entendido", color = BuddyColor.Brand, style = BuddyType.FootnoteBold)
+                }
+            },
+        )
+    }
+
     // "No se pudo subir la foto" — misma copy que iOS
     if (state.avatarUploadFailed) {
         androidx.compose.material3.AlertDialog(

@@ -42,6 +42,15 @@ interface ProfileApi {
     suspend fun journeyPages(@Path("id") journeyId: String): List<ApiJourneyPage>
 
     /** Despublica un journey del perfil (cancelled + is_public=false). */
+    /** Cancela el VIAJE completo: sus lugares y los apoyos en curso.
+     *
+     *  Es lo que hay que llamar para borrar una publicación del perfil.
+     *  /users/:id/trips agrupa los journeys por viaje —feed_trip_json_by_trip
+     *  devuelve 'id', j_group.trip_id—, así que el id de una tarjeta del perfil
+     *  es de un TRIP. */
+    @DELETE("trips/{id}")
+    suspend fun cancelTrip(@Path("id") tripId: String)
+
     @DELETE("journeys/{id}")
     suspend fun deleteJourney(@Path("id") journeyId: String)
 

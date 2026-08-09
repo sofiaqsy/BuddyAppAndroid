@@ -41,6 +41,7 @@ class YoViewModel @Inject constructor(
         val isDeletingAccount: Boolean = false,
         val isUploadingAvatar: Boolean = false,
         val avatarUploadFailed: Boolean = false,
+        val deletePublicationFailed: Boolean = false,
     ) {
         /** "N trips · N stickers" — igual que metaLine (iOS). */
         val metaLine: String
@@ -142,16 +143,38 @@ class YoViewModel @Inject constructor(
 
     /**
      * Elimina una publicación del perfil — optimista: sale del grid al
-     * instante; el backend la despublica (cancelled + is_public=false) y
-     * desaparece también del feed de la comunidad.
+     * instante y el backend cancela el viaje entero, con lo que sale también
+     * del feed de la comunidad.
+     *
+     * EL ID ES DE UN TRIP, NO DE UN JOURNEY
+     *
+     * /users/:id/trips agrupa los journeys por viaje y la RPC devuelve
+     * 'id', j_group.trip_id. Esto llamaba a deleteJourney con ese id, así que
+     * el servidor no encontraba ningún journey y respondía 403 SIEMPRE: el
+     * borrado nunca funcionó, solo lo parecía porque la fila desaparecía de la
+     * pantalla. Comprobado contra la base: de 8 publicaciones, 0 ids eran
+     * journeys.
+     *
+     * Y si falla, la fila vuelve. Antes desaparecía igual: la vista afirmaba
+     * un hecho que el servidor había rechazado, y al siguiente arranque la
+     * publicación reaparecía sin explicación.
      */
     fun deletePublication(journey: ApiJourney) {
+        val anteriores = _state.value.journeys
         _state.update { s -> s.copy(journeys = s.journeys.filter { it.id != journey.id }) }
         viewModelScope.launch {
-            runCatching { api.deleteJourney(journey.id) }
-                .onFailure { Log.e(TAG, "deletePublication failed", it) }
+            runCatching { api.cancelTrip(journey.id) }
+                .onSuccess { Log.d(TAG, "publicación ${journey.id.take(8)} eliminada") }
+                .onFailure {
+                    Log.e(TAG, "deletePublication failed — restaurando", it)
+                    _state.update { s -> s.copy(journeys = anteriores, deletePublicationFailed = true) }
+                }
         }
     }
+
+    /** Lo enciende el fallo de borrado; lo apaga la vista al mostrar el aviso.
+     *  Sin esto la fila reaparecía sola y parecía otro bug distinto. */
+    fun dismissDeleteError() = _state.update { it.copy(deletePublicationFailed = false) }
 
     fun saveBio(bio: String, onDone: () -> Unit) {
         val myId = _state.value.user?.id ?: return
