@@ -53,6 +53,9 @@ fun BuddyRoot() {
     var mapJourney by androidx.compose.runtime.remember {
         mutableStateOf<com.buddy.app.core.data.model.ApiJourney?>(null)
     }
+    /** El lugar que venía elegido al abrir el mapa, si se llegó tocando UNO
+     *  concreto. Nulo cuando lo que se abrió es el destino entero. */
+    var mapSpotId by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
 
     // Mismo ViewModel (scope de Activity) que usa el tab Conexiones —
     // el badge refleja chatStore.totalUnread como en iOS.
@@ -89,7 +92,8 @@ fun BuddyRoot() {
     mapJourney?.let { journey ->
         com.buddy.app.features.trips.map.TripMapScreen(
             journey = journey,
-            onBack = { mapJourney = null },
+            initialSpotId = mapSpotId,
+            onBack = { mapJourney = null; mapSpotId = null },
         )
         return
     }
@@ -162,6 +166,11 @@ fun BuddyRoot() {
                 onOpenPlace = { card ->
                     val destId = card.destinationId
                     if (destId != null) {
+                        // Tocar un LUGAR abre el mapa con ese lugar ya elegido;
+                        // tocar una ciudad (comunidad viva) abre el destino
+                        // entero. Se distinguen por el id: la ciudad viaja como
+                        // tarjeta sintética cuyo id ES el del destino.
+                        mapSpotId = card.id.takeIf { it != destId }
                         mapJourney = com.buddy.app.core.data.model.ApiJourney(
                             id = card.id,
                             title = card.destinationName ?: card.name,
@@ -182,7 +191,7 @@ fun BuddyRoot() {
                 modifier,
                 onOpenConexiones = { selectedTab = AppTab.Conexiones },
                 onOpenBook = { journey, page, isStandaloneShare -> bookJourney = Triple(journey, page, isStandaloneShare) },
-                onOpenMap = { mapJourney = it },
+                onOpenMap = { mapJourney = it; mapSpotId = null },
                 onPublished = { selectedTab = AppTab.Inicio },
                 isApprovedBuddy = conexionesState.isApprovedBuddy,
             )

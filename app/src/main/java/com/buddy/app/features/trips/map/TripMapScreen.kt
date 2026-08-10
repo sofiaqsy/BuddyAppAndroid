@@ -103,6 +103,10 @@ class TripMapViewModel @Inject constructor(
 @Composable
 fun TripMapScreen(
     journey: ApiJourney,
+    /** Lugar ya elegido al entrar: se llega tocando ESE lugar (el carrusel del
+     *  Home), no el destino. Se aplica UNA vez — si luego se cierra la ficha,
+     *  el mapa se queda en la lista, que es lo que el gesto de cerrar pidió. */
+    initialSpotId: String? = null,
     onBack: () -> Unit,
     viewModel: TripMapViewModel = hiltViewModel(),
 ) {
@@ -122,6 +126,17 @@ fun TripMapScreen(
     var navigationTarget by remember { mutableStateOf<ApiGuideSpot?>(null) }
     var fotoAmpliada by remember { mutableStateOf<FotoDeLugar?>(null) }
     var mapRef by remember { mutableStateOf<MapView?>(null) }
+
+    var yaAplicoInicial by remember { mutableStateOf(false) }
+    LaunchedEffect(initialSpotId, spots) {
+        if (yaAplicoInicial || initialSpotId == null) return@LaunchedEffect
+        val elegido = spots.firstOrNull { it.id == initialSpotId } ?: return@LaunchedEffect
+        yaAplicoInicial = true
+        selectedSpotId = elegido.id
+        // Centrado y con zoom de calle: el mapa tiene que responder "¿dónde
+        // queda?" sin que haya que buscarlo entre los demás marcadores.
+        mapRef?.controller?.animateTo(GeoPoint(elegido.lat, elegido.lng), 15.5, 400L)
+    }
 
     val selectedSpot = spots.firstOrNull { it.id == selectedSpotId }
 
@@ -162,8 +177,13 @@ fun TripMapScreen(
     // —lo último que se dibuja— quedaba cortada por el borde de la pantalla.
     val insetInferior = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
-    val center = remember(destLat, destLng, spots) {
+    val center = remember(destLat, destLng, spots, initialSpotId) {
+        val elegido = initialSpotId?.let { id -> spots.firstOrNull { it.id == id } }
         when {
+            // Se entró tocando un lugar: el mapa nace centrado ahí. El animateTo
+            // de después solo corrige si la vista ya existía; sin esto el mapa
+            // aparecía encuadrando la ciudad y luego saltaba.
+            elegido != null -> GeoPoint(elegido.lat, elegido.lng)
             spots.isNotEmpty() -> GeoPoint(spots.map { it.lat }.average(), spots.map { it.lng }.average())
             destLat != null && destLng != null -> GeoPoint(destLat, destLng)
             else -> null
@@ -195,7 +215,7 @@ fun TripMapScreen(
                         setTileSource(TileSourceFactory.MAPNIK)
                         setMultiTouchControls(true)
                         zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
-                        controller.setZoom(if (spots.isEmpty()) 15.0 else 13.5)
+                        controller.setZoom(if (spots.isEmpty() || initialSpotId != null) 15.5 else 13.5)
                         controller.setCenter(center)
                         mapRef = this
                     }
