@@ -2,4 +2,6 @@
 <paths>
     <!-- Capturas de cámara del Trip Book (memoir) -->
     <cache-path name="camera" path="camera/" />
+    <!-- Tarjeta de lugar rasterizada para compartir fuera de la app -->
+    <cache-path name="compartir" path="compartir/" />
 </paths>

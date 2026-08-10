@@ -819,6 +819,9 @@ private fun BuddyMessageBubble(msg: ApiMessage, isMe: Boolean) {
     val isLocation = msg.content?.startsWith("location:") == true
     val isPlace = msg.content?.startsWith("place:") == true
     val isCategory = msg.content?.startsWith("category_card:") == true
+    /** El sobre nuevo. Nulo ante cualquier duda —JSON roto, versión futura— y
+     *  entonces la burbuja cae al texto, que es preferible a una tarjeta rota. */
+    val tarjeta = com.buddy.app.core.data.model.ChatCard.decodePlace(msg.content)
     val timeStr = shortTime(msg.createdAt)
 
     // Espejo del HStack de iOS: Spacer(minLength: 56) al lado contrario acota
@@ -837,6 +840,10 @@ private fun BuddyMessageBubble(msg: ApiMessage, isMe: Boolean) {
                 isImage -> ImageBubble(msg.imageUrl!!, timeStr)
                 isCategory -> {
                     CategoryCardBubble(msg.content!!, isMe)
+                    CardTime(timeStr)
+                }
+                tarjeta != null -> {
+                    LugarRecomendadoBubble(tarjeta)
                     CardTime(timeStr)
                 }
                 isPlace -> {
@@ -968,6 +975,54 @@ private fun CategoryCardBubble(content: String, isMe: Boolean) {
             Text(if (isMe) "Necesito ayuda con" else "Necesita ayuda con", style = BuddyType.Caption1, color = BuddyColor.InkMuted)
             Text(label, style = BuddyType.FootnoteBold, color = BuddyColor.Ink)
             Text(subtitle, style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+        }
+    }
+}
+
+/**
+ * Un lugar recomendado, compartido dentro del chat — espejo de
+ * lugarRecomendadoCard (iOS).
+ *
+ * Con FOTO grande y no un pin con el nombre al lado, como `place:`: aquello es
+ * una locación —unas coordenadas para verse con alguien—, esto es una
+ * recomendación, y lo que la sostiene es cómo se ve el sitio y quién lo
+ * recomienda.
+ */
+@Composable
+private fun LugarRecomendadoBubble(card: com.buddy.app.core.data.model.ChatCard.Place) {
+    val context = LocalContext.current
+    Column(
+        Modifier
+            .widthIn(max = 240.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(BuddyColor.Surface)
+            .border(1.dp, BuddyColor.Border, RoundedCornerShape(16.dp))
+            .clickable { openMap(context, card.lat ?: 0.0, card.lng ?: 0.0, card.name) },
+    ) {
+        if (card.photoUrl != null) {
+            coil.compose.AsyncImage(
+                model = card.photoUrl,
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.fillMaxWidth().height(132.dp).background(BuddyColor.SurfaceRaised),
+            )
+        }
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            if (!card.category.isNullOrEmpty()) {
+                Text(
+                    card.category.uppercase(),
+                    style = BuddyType.Caption2, color = BuddyColor.InkMuted,
+                    letterSpacing = 0.6.sp,
+                )
+            }
+            Text(card.name, style = BuddyType.FootnoteBold, color = BuddyColor.Ink, maxLines = 2)
+            // El autor y no un conteo: la recomendación de una persona concreta
+            // pesa más como prueba social.
+            val autor = card.authorName?.trim()?.split(" ")?.firstOrNull()?.takeIf { it.isNotEmpty() }
+            if (autor != null) {
+                Text("Recomendado por $autor", style = BuddyType.Caption2, color = BuddyColor.InkMuted, maxLines = 1)
+            }
+            Text("Ver lugar", style = BuddyType.Caption1, color = BuddyColor.Brand)
         }
     }
 }

@@ -472,6 +472,9 @@ class HomeViewModel @Inject constructor(
     private fun displayText(msg: com.buddy.app.features.matching.data.ApiMessage, fromMe: Boolean): String {
         if (msg.type == "audio" || msg.type == "audio_message") return "Mensaje de voz"
         val content = msg.content ?: ""
+        // El sobre nuevo primero: sin esto la línea del CTA mostraría el JSON
+        // crudo del mensaje.
+        com.buddy.app.core.data.model.ChatCard.resumen(content)?.let { return it }
         return when {
             content.startsWith("location:") -> "Ubicación actual"
             content.startsWith("place:") -> {

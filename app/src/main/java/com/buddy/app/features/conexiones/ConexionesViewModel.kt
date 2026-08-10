@@ -88,6 +88,8 @@ data class ConnectionItem(
             val msg = lastMessage ?: return "Nueva conexión"
             if (msg.type == "audio") return "Mensaje de voz"
             val content = msg.content.orEmpty()
+            // El sobre `card:` primero: sin esto la fila mostraría el JSON crudo.
+            com.buddy.app.core.data.model.ChatCard.resumen(content)?.let { return it }
             return when {
                 content.startsWith("location:") -> "Ubicación actual"
                 content.startsWith("place:") -> {
@@ -358,6 +360,19 @@ class ConexionesViewModel @Inject constructor(
             load()
         }
     }
+
+    /**
+     * Manda un mensaje a una conversación existente. Lo usa compartir un lugar:
+     * el destino es un match que ya está en esta lista, así que el envío vive
+     * donde vive la lista y no obliga a montar el ViewModel del chat.
+     *
+     * Devuelve si llegó — quien llama decide qué contar; aquí no hay UI a la
+     * que avisarle.
+     */
+    suspend fun enviarMensaje(matchId: String, content: String): Boolean =
+        runCatching { chatRepo.send(matchId, content) }
+            .onFailure { Log.e(TAG, "enviarMensaje falló", it) }
+            .isSuccess
 
     fun clearOpenMatch() = _state.update { it.copy(openMatch = null) }
 
