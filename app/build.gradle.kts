@@ -29,6 +29,10 @@ android {
         versionName = "1.0.2"
 
         buildConfigField("String", "API_BASE_URL", "\"https://buddy-core-504b393f8333.herokuapp.com/v1/\"")
+        // Dominio público de los enlaces que se comparten fuera de la app. NO es
+        // el de la API: lo que viaja en un WhatsApp tiene que abrir una página
+        // que alguien sin Buddy pueda leer.
+        buildConfigField("String", "PUBLIC_BASE_URL", "\"https://www.buddyapp.biz\"")
         // Client "Buddy App Web" (tipo Aplicación web) del proyecto BuddyApp —
         // GetGoogleIdOption.serverClientId EXIGE un cliente web, nunca uno tipo
         // Android (usar el Android daba 28444). El backend valida el aud contra

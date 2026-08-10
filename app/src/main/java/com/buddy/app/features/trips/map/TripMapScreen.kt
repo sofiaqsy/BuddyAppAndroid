@@ -203,6 +203,8 @@ fun TripMapScreen(
         FotoAmpliada(foto = foto, onClose = { fotoAmpliada = null })
     }
 
+    val contexto = androidx.compose.ui.platform.LocalContext.current
+
     DisposableEffect(Unit) { onDispose { mapRef?.onDetach() } }
 
     Box(Modifier.fillMaxSize().background(BuddyColor.Canvas)) {
@@ -328,6 +330,7 @@ fun TripMapScreen(
                         buddies = buddies,
                         isLoadingBuddies = isLoadingBuddies,
                         onNavigate = { navigationTarget = spot },
+                        onShare = { compartir(contexto, spot, destId, fotos.firstOrNull()?.autor) },
                         onOpenPhoto = { fotoAmpliada = it },
                         onClose = { selectedSpotId = null },
                     )
@@ -433,4 +436,46 @@ private fun FotoAmpliada(foto: FotoDeLugar, onClose: () -> Unit) {
             }
         }
     }
+}
+
+/**
+ * Compartir el lugar FUERA de Buddy, por la hoja del sistema.
+ *
+ * NOMBRA A LA PERSONA, NO A LA APP
+ *
+ * Quien comparte no descubrió el lugar: lo descubrió Angie, y que alguien real
+ * lo recomiende es todo el valor del mensaje. "Encontré este lugar en Buddy" se
+ * lleva un crédito que no le toca y debilita justo lo que hace fuerte a la
+ * recomendación.
+ *
+ * El enlace es el Universal Link público: con Buddy instalado abre la ficha y
+ * sin ella, la página del lugar — lo que llega por WhatsApp tiene que servirle
+ * también a quien todavía no tiene la app. El destino viaja como `d` para que
+ * la app cargue la guía correcta sin una consulta extra.
+ *
+ * Solo texto, a diferencia de iOS, que además rasteriza la tarjeta y la manda
+ * como imagen. Falta esa parte.
+ */
+private fun compartir(
+    contexto: android.content.Context,
+    spot: ApiGuideSpot,
+    destinationId: String?,
+    autor: String?,
+) {
+    val nombreAutor = autor?.trim()?.split(" ")?.firstOrNull()?.takeIf { it.isNotEmpty() }
+    val presentacion = if (nombreAutor != null) {
+        "$nombreAutor recomendó este lugar en Buddy. Míralo aquí:"
+    } else {
+        "Un buddy recomendó este lugar. Míralo aquí:"
+    }
+    val enlace = buildString {
+        append(com.buddy.app.BuildConfig.PUBLIC_BASE_URL)
+        append("/place/").append(spot.id)
+        if (destinationId != null) append("?d=").append(destinationId)
+    }
+    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_TEXT, "📍 ${spot.name}\n$presentacion\n$enlace")
+    }
+    contexto.startActivity(android.content.Intent.createChooser(intent, "Compartir ${spot.name}"))
 }

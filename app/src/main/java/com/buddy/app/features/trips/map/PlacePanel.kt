@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Photo
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -134,9 +135,9 @@ fun PlacePhotoCard(
  * como la respuesta a haber tocado el lugar, y el mapa sigue ahí detrás
  * mostrando dónde queda.
  *
- * Sin "añadir foto" ni "compartir" todavía: Android no tiene ni el editor de
- * recomendaciones ni la hoja de compartir, y un botón que no lleva a ningún
- * lado es peor que su ausencia.
+ * Sin "añadir foto" todavía: Android no tiene el editor de recomendaciones, y
+ * un botón que no lleva a ningún lado es peor que su ausencia. Compartir sí
+ * está, por la hoja del sistema.
  */
 @Composable
 fun PlaceGuideDetail(
@@ -147,6 +148,7 @@ fun PlaceGuideDetail(
     buddies: List<ApiPlaceBuddy>,
     isLoadingBuddies: Boolean,
     onNavigate: () -> Unit,
+    onShare: () -> Unit,
     onOpenPhoto: (FotoDeLugar) -> Unit,
     onClose: () -> Unit,
 ) {
@@ -157,13 +159,30 @@ fun PlaceGuideDetail(
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // El nombre se queda con TODO el espacio sobrante y los botones
+            // quedan pegados al margen derecho. Antes el título y un Spacer se
+            // repartían ese sobrante a medias, así que los botones flotaban a
+            // media fila, sin alinearse ni con el nombre ni con el borde.
             Text(
                 spot.name,
                 fontSize = 19.sp, fontWeight = FontWeight.Bold, color = BuddyColor.Ink,
-                maxLines = 1, modifier = Modifier.weight(1f, fill = false),
+                maxLines = 1, modifier = Modifier.weight(1f),
             )
-            Spacer(Modifier.weight(1f))
+            // Compartir junto a "cómo llegar" porque son las dos cosas que se
+            // hacen CON un lugar. En secundario: llegar es la acción de quien ya
+            // decidió ir; compartir es para otra persona.
+            Box(
+                Modifier.size(28.dp).clip(CircleShape).background(BuddyColor.GroupedBg)
+                    .clickable(onClick = onShare),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Share, contentDescription = "Compartir ${spot.name}",
+                    Modifier.size(14.dp), tint = BuddyColor.Ink,
+                )
+            }
             // Llegar en el color de marca y cerrar en gris: son la acción y su
             // salida, no dos opciones del mismo peso.
             Box(
@@ -176,7 +195,6 @@ fun PlaceGuideDetail(
                     Modifier.size(14.dp), tint = BuddyColor.InkInverse,
                 )
             }
-            Spacer(Modifier.width(8.dp))
             Box(
                 Modifier.size(28.dp).clip(CircleShape).background(BuddyColor.GroupedBg)
                     .clickable(onClick = onClose),
