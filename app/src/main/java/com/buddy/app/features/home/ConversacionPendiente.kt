@@ -31,6 +31,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -259,3 +262,101 @@ private val categoriasConsulta = listOf(
     CategoriaConsulta("recommendations", "Consejos", "Recomendaciones",
         Icons.Filled.Lightbulb),
 )
+
+/**
+ * La conversación a PANTALLA COMPLETA, con su propia lógica de solicitud.
+ *
+ * Vive aquí y no dentro de InicioScreen porque tiene que renderizarse fuera
+ * del Scaffold, como el chat real: una hoja modal deja la barra de tabs
+ * asomando abajo y se lee como "algo encima del Home" en vez de como la
+ * conversación en la que estás. El chat de Buddy siempre ha ocupado la
+ * pantalla entera; esto es el mismo chat en un momento anterior.
+ *
+ * Y una sola superficie para todo el recorrido: elegir tema, buscar, y el chat
+ * real cuando alguien acepta. El contenido se reemplaza; el usuario no navega.
+ */
+@androidx.compose.runtime.Composable
+fun ConversacionPendienteHost(
+    homeVm: HomeViewModel,
+    matchingVm: com.buddy.app.features.matching.MatchingViewModel,
+    onOpenTrips: () -> Unit,
+    onOpenConexiones: () -> Unit,
+    onClose: () -> Unit,
+) {
+    val state by homeVm.state.collectAsState()
+    val searchState by matchingVm.state.collectAsState()
+    var categoriaElegida by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf<String?>(null)
+    }
+
+    /**
+     * Espejo de submitHelpFromHome (iOS), con el contexto explícito del
+     * selector en vez de "hay trip → usarlo siempre". Se movió aquí desde
+     * InicioScreen sin cambiar la lógica: ahora la dispara el tema elegido
+     * dentro de la conversación.
+     */
+    fun solicitar(category: String) {
+        val ctx = state.effectiveHomeContext
+        val esElTripConMatch = ctx is HomeContext.Trip && ctx.journeyId == state.activeJourney?.id
+        val esPionero = state.communityContext?.totalBuddies == 0
+        when {
+            esElTripConMatch && state.activeMatchId != null -> Unit  // ya hay chat: el CTA lleva ahí
+            esElTripConMatch && state.activeBuddyName != null -> onOpenConexiones()
+            // Pioneer: sin buddies no hay nada que buscar — registra trip +
+            // solicitud en silencio y navega a "Tu trip" (iOS).
+            esPionero && (state.destinationId != null || state.userLat != null) ->
+                matchingVm.pioneerRegister(
+                    destinationId = state.destinationId,
+                    lat = state.userLat, lng = state.userLng,
+                    category = category,
+                    cityName = state.destinationName,
+                    onDone = { onClose(); onOpenTrips() },
+                )
+            state.destinationId != null ->
+                matchingVm.findBuddy(
+                    state.destinationId!!, category,
+                    ensureJourney = ctx is HomeContext.Trip,
+                )
+            else -> { onClose(); onOpenTrips() }   // sin ubicación: registrar a mano
+        }
+    }
+
+    fun cerrar() {
+        // Cerrar mientras busca cancela la búsqueda: dejarla viva sin nada en
+        // pantalla que lo diga es como se acumulan solicitudes olvidadas.
+        if (searchState is com.buddy.app.features.matching.MatchingViewModel.SearchState.Searching) {
+            matchingVm.cancelSearch()
+        }
+        categoriaElegida = null
+        onClose()
+    }
+
+    val emparejado = searchState as? com.buddy.app.features.matching.MatchingViewModel.SearchState.Matched
+    if (emparejado != null) {
+        // Un buddy aceptó: la misma pantalla pasa a ser el chat.
+        com.buddy.app.features.messages.ChatScreen(
+            matchId = emparejado.matchId,
+            title = emparejado.buddy?.fullName?.split(" ")?.firstOrNull() ?: "Chat",
+            initialCategory = emparejado.category,
+            onBack = {
+                matchingVm.dismiss()
+                categoriaElegida = null
+                onClose()
+                homeVm.refreshTripState()
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+    } else {
+        ConversacionPendiente(
+            destinationName = state.destinationName,
+            // El tema sale del estado de búsqueda cuando existe: así sobrevive
+            // a una recomposición y al reintento.
+            categoriaElegida = (searchState as? com.buddy.app.features.matching.MatchingViewModel.SearchState.Searching)?.category
+                ?: categoriaElegida,
+            buscando = searchState is com.buddy.app.features.matching.MatchingViewModel.SearchState.Searching,
+            onElegirCategoria = { categoriaElegida = it; solicitar(it) },
+            onBack = { cerrar() },
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}

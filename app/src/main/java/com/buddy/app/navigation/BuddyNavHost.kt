@@ -39,6 +39,8 @@ fun BuddyRoot() {
         }
     }
     var openChatId by rememberSaveable { mutableStateOf<String?>(null) }
+    /** Conversación pendiente abierta desde "Consultar en X". */
+    var conversacionAbierta by rememberSaveable { mutableStateOf(false) }
     var openChatCategory by rememberSaveable { mutableStateOf<String?>(null) }
     // Editor Memoir a pantalla completa — como iOS oculta tab bar y nav bar.
     // Triple (journey, initialPage, isStandaloneShare): -1 = nuevo momento,
@@ -66,6 +68,22 @@ fun BuddyRoot() {
     // la bitácora al volver del book.
     val tripsVm: com.buddy.app.features.trips.TripsViewModel =
         androidx.hilt.navigation.compose.hiltViewModel()
+
+    // "Consultar en X" → la conversación a pantalla completa, ANTES del
+    // Scaffold igual que el chat: una hoja modal dejaba la barra de tabs
+    // asomando y se leía como algo encima del Home, no como la conversación en
+    // la que estás. Es el mismo chat en un momento anterior, así que ocupa la
+    // pantalla entera como el chat.
+    if (conversacionAbierta) {
+        com.buddy.app.features.home.ConversacionPendienteHost(
+            homeVm = homeVm,
+            matchingVm = androidx.hilt.navigation.compose.hiltViewModel(),
+            onOpenTrips = { conversacionAbierta = false; selectedTab = AppTab.Trips },
+            onOpenConexiones = { conversacionAbierta = false; selectedTab = AppTab.Conexiones },
+            onClose = { conversacionAbierta = false },
+        )
+        return
+    }
 
     // Mapa del trip → pantalla completa sin tab bar (como TripDetailView, iOS)
     mapJourney?.let { journey ->
@@ -137,6 +155,7 @@ fun BuddyRoot() {
                     openChatCategory = category
                     openChatId = matchId
                 },
+                onStartConversation = { conversacionAbierta = true },
                 // El mapa del destino al que pertenece el lugar — el mismo que
                 // abre un trip. Sin destination_id no hay guía que abrir y el
                 // tap no hace nada, igual que en iOS.

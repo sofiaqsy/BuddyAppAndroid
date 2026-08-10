@@ -54,9 +54,14 @@ interface HomeApi {
      * un lugar es una referencia sobre un sitio concreto. Es un carrusel, así
      * que no lleva cursor.
      */
+    /** Con destination_id devuelve SOLO lo de ese destino, y vacío si no hay
+     *  nada. Las coordenadas son el respaldo mientras el GPS no resuelve: la
+     *  caja del servidor abarca ~100 km, así que desde Miraflores traía lugares
+     *  de Lima y el Home se contradecía. */
     @GET("feed/place-shares")
     suspend fun placeShares(
         @Query("limit") limit: Int = 12,
+        @Query("destination_id") destinationId: String? = null,
         @Query("lat") lat: Double? = null,
         @Query("lng") lng: Double? = null,
     ): com.buddy.app.core.data.model.ApiPlaceCardsResponse

@@ -102,6 +102,10 @@ fun InicioScreen(
     /** Abre el lugar del carrusel en el mapa de su destino. Lo resuelve quien
      *  contiene la pantalla: el Home no conoce rutas, igual que en iOS. */
     onOpenPlace: (ApiPlaceCard) -> Unit = {},
+    /** "Consultar en X" — abre la conversación a pantalla completa. La monta
+     *  quien contiene esta pantalla, fuera del Scaffold: dentro quedaría la
+     *  barra de tabs asomando y no se leería como el chat que es. */
+    onStartConversation: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
     matchingViewModel: MatchingViewModel = hiltViewModel(),
 ) {
@@ -129,52 +133,9 @@ fun InicioScreen(
     val isPioneerRegistering by matchingViewModel.isPioneerRegistering.collectAsState()
     val isFindingBuddy = searchState is MatchingViewModel.SearchState.Searching || isPioneerRegistering
 
-    var mostrarIntenciones by remember { mutableStateOf(false) }
-    /** Tema elegido dentro de la conversación. Null = todavía se está eligiendo. */
-    var categoriaEnConversacion by remember { mutableStateOf<String?>(null) }
-
-    /**
-     * Espejo de submitHelpFromHome (iOS), con el contexto explícito del selector
-     * en vez de "hay trip → usarlo siempre": buddy activo (solo si el trip
-     * elegido es el que tiene match) → seguir la conversación; pioneer con
-     * destino → trip + solicitud y a "Tu trip"; pioneer sin destino pero con GPS
-     * → pioneerRegister; sin nada → registro de trip.
-     *
-     * Sale de la celda de categoría —que ya no existe en el Home— y pasa a ser
-     * lo que dispara la hoja de intenciones. La lógica no cambió.
-     */
-    val solicitarAyuda: (String) -> Unit = solicitarAyuda@{ category ->
-        val effectiveContext = state.effectiveHomeContext
-        val selectedIsActiveTrip = effectiveContext is HomeContext.Trip &&
-            effectiveContext.journeyId == state.activeJourney?.id
-        val isPioneer = state.communityContext?.totalBuddies == 0
-        val activeMatchId = state.activeMatchId
-        when {
-            // Buddy asignado: solo intercepta si el trip elegido es el que tiene
-            // el match — con "Ubicación actual" (u otro trip sin match) elegida,
-            // una categoría nueva siempre arma una solicitud nueva.
-            selectedIsActiveTrip && activeMatchId != null ->
-                onOpenChat(activeMatchId, category)
-            selectedIsActiveTrip && state.activeBuddyName != null ->
-                onOpenConexiones()
-            // Pioneer: sin buddies no hay nada que buscar — registra trip +
-            // solicitud en silencio y navega a "Tu trip" (iOS).
-            isPioneer && (state.destinationId != null || state.userLat != null) ->
-                matchingViewModel.pioneerRegister(
-                    destinationId = state.destinationId,
-                    lat = state.userLat, lng = state.userLng,
-                    category = category,
-                    cityName = state.destinationName,
-                    onDone = onOpenTrips,
-                )
-            state.destinationId != null ->
-                matchingViewModel.findBuddy(
-                    state.destinationId!!, category,
-                    ensureJourney = effectiveContext is HomeContext.Trip,
-                )
-            else -> onOpenTrips()   // sin ubicación: registrar trip a mano (como iOS)
-        }
-    }
+    // La lógica de "pedir ayuda" (pioneer, findBuddy, buddy ya asignado) se
+    // mudó a ConversacionPendienteHost: ahora la dispara el tema que se elige
+    // DENTRO de la conversación, y esa vive fuera de esta pantalla.
 
     Column(
         modifier.fillMaxSize().background(BuddyColor.Canvas).verticalScroll(rememberScrollState()),
@@ -269,77 +230,13 @@ fun InicioScreen(
                     // hilo que ya existe.
                     state.activeMatchId?.let { onOpenChat(it, null) } ?: onOpenConexiones()
                 },
-                onStartConversation = { mostrarIntenciones = true },
+                onStartConversation = onStartConversation,
             )
 
-            // La intención se elige DENTRO de la conversación, no en una hoja
-            // de formulario: pedir ayuda deja de ser una pantalla que se
-            // completa y pasa a ser un hilo que se inicia. Igual que iOS.
-            // UNA sola hoja para todo el recorrido, igual que iOS.
-            //
-            // El contenido se REEMPLAZA según el estado —elegir tema, buscando,
-            // y el chat real cuando alguien acepta— en vez de abrir una pantalla
-            // nueva en cada paso. Esa es la idea entera: no son tres momentos
-            // distintos, es la misma conversación que va avanzando. Android
-            // apilaba una segunda hoja encima (MatchingSheet) y luego navegaba
-            // a otra pantalla para el chat.
-            if (mostrarIntenciones) {
-                val emparejado = searchState as? MatchingViewModel.SearchState.Matched
-                BuddySheet(
-                    onDismiss = {
-                        // Cerrar mientras busca cancela la búsqueda: dejarla viva
-                        // sin nada en pantalla que lo diga sería peor.
-                        if (searchState is MatchingViewModel.SearchState.Searching) {
-                            matchingViewModel.cancelSearch()
-                        }
-                        mostrarIntenciones = false
-                        categoriaEnConversacion = null
-                    },
-                    fullHeight = true,
-                ) {
-                    if (emparejado != null) {
-                        // Un buddy aceptó: la misma hoja pasa a ser el chat.
-                        ChatScreen(
-                            matchId = emparejado.matchId,
-                            title = emparejado.buddy?.fullName?.split(" ")?.firstOrNull() ?: "Chat",
-                            initialCategory = emparejado.category,
-                            onBack = {
-                                matchingViewModel.dismiss()
-                                mostrarIntenciones = false
-                                categoriaEnConversacion = null
-                                viewModel.refreshTripState()
-                            },
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    } else {
-                        ConversacionPendiente(
-                            destinationName = state.destinationName,
-                            // El tema sale del estado de búsqueda cuando existe:
-                            // así sobrevive a una recomposición y al reintento.
-                            categoriaElegida = (searchState as? MatchingViewModel.SearchState.Searching)?.category
-                                ?: categoriaEnConversacion,
-                            buscando = isFindingBuddy,
-                            onElegirCategoria = { category ->
-                                // La categoría se queda visible en el hilo
-                                // mientras arranca la búsqueda: es lo que el
-                                // usuario ya dijo.
-                                categoriaEnConversacion = category
-                                solicitarAyuda(category)
-                            },
-                            onBack = {
-                                if (searchState is MatchingViewModel.SearchState.Searching) {
-                                    matchingViewModel.cancelSearch()
-                                }
-                                mostrarIntenciones = false
-                                categoriaEnConversacion = null
-                            },
-                            // fillMaxSize y no una altura fija: es una pantalla,
-                            // y 620dp se quedaba corto o largo según el teléfono.
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                }
-            }
+            // "Consultar en X" abre la conversación a PANTALLA COMPLETA — la
+            // monta BuddyRoot fuera del Scaffold, como el chat. Una hoja modal
+            // dejaba la barra de tabs asomando y se leía como algo encima del
+            // Home en vez de como la conversación en la que estás.
             Spacer(Modifier.height(Spacing.md))
 
             // Aquí iba una segunda card de "buddy asignado". Se quitó: el CTA
@@ -400,12 +297,7 @@ fun InicioScreen(
         Spacer(Modifier.height(100.dp))
     }
 
-    // Solo cuando la búsqueda arrancó FUERA de la conversación (una categoría
-    // tocada desde otro sitio). Con la hoja abierta, el estado ya se está
-    // contando dentro de ella: dos hojas superpuestas diciendo lo mismo.
-    if (!mostrarIntenciones) {
-        MatchingSheet(searchState, matchingViewModel, onOpenChat, onOpenConexiones)
-    }
+    MatchingSheet(searchState, matchingViewModel, onOpenChat, onOpenConexiones)
 }
 
 // ── Location context — "Estás en X" / activar ubicación ───────────────────

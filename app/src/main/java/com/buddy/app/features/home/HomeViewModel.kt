@@ -196,7 +196,6 @@ class HomeViewModel @Inject constructor(
                 loadTripAndMatch()
                 refreshCommunityContext()
                 loadCommunityLive()  // Cargar comunidad viva en paralelo
-                loadExploreCards()
                 refreshOpenRequest()
                 loadFeed()
             } catch (e: Exception) {
@@ -226,22 +225,44 @@ class HomeViewModel @Inject constructor(
      * Sin coordenadas el backend responde igual —los más recientes—, así que no
      * se bloquea esperando permiso de ubicación.
      */
-    private suspend fun loadExploreCards() {
-        _state.update { it.copy(isLoadingExplore = true) }
-        val s = _state.value
-        runCatching { api.placeShares(limit = 12, lat = s.userLat, lng = s.userLng).items }
+    /**
+     * Los lugares recomendados del destino en el que se está AHORA.
+     *
+     * Se limpian antes de pedir: mientras llega la respuesta no puede quedarse
+     * en pantalla lo del sitio anterior. Al llegar a Miraflores el título decía
+     * Miraflores y las fotos seguían siendo de Lima.
+     *
+     * Sin relleno con destinos vecinos: si aquí no hay nada recomendado, la
+     * sección va vacía. Rellenar esconde justo dónde falta contenido.
+     */
+    private suspend fun loadExploreCards(destinationId: String?) {
+        if (cardsDelDestino == destinationId) return
+        cardsDelDestino = destinationId
+        _state.update { it.copy(exploreCards = emptyList(), isLoadingExplore = destinationId != null) }
+        if (destinationId == null) return
+
+        runCatching { api.placeShares(limit = 12, destinationId = destinationId).items }
             .onSuccess { cards ->
-                Log.d(TAG, "placeShares → ${cards.size}: ${cards.joinToString { c -> "${c.name}(${c.photoCount}f/${c.buddyCount}b)" }}")
+                // El destino pudo cambiar mientras volvía: sin esto, la
+                // respuesta lenta de un sitio del que ya te fuiste pisaría la
+                // del sitio donde estás.
+                if (cardsDelDestino != destinationId) {
+                    Log.d(TAG, "placeShares de ${destinationId.take(8)} descartado — el destino cambió")
+                    return@onSuccess
+                }
+                Log.d(TAG, "placeShares ${destinationId.take(8)} → ${cards.size}: ${cards.joinToString { c -> c.name }}")
                 _state.update { it.copy(exploreCards = cards, isLoadingExplore = false) }
             }
             .onFailure {
                 Log.e(TAG, "placeShares failed", it)
-                // isLoadingExplore=false sin vaciar exploreCards: un fallo no es
-                // "no hay lugares". Si ya había tarjetas se quedan; si no, el
-                // composer cae al CTA suelto, que es su estado legítimo.
+                // Un fallo no es "no hay lugares", pero tampoco puede dejar en
+                // pantalla los del destino anterior: ya se vaciaron arriba.
                 _state.update { st -> st.copy(isLoadingExplore = false) }
             }
     }
+
+    /** De qué destino son las cards que hay ahora en pantalla. */
+    private var cardsDelDestino: String? = null
 
     /**
      * Mi solicitud abierta, si la hay. Alimenta el estado "Buscando buddy…" del
@@ -370,6 +391,7 @@ class HomeViewModel @Inject constructor(
                     communityContext = ctx,
                 )
             }
+            loadExploreCards(destId)
             return
         }
 
@@ -387,6 +409,8 @@ class HomeViewModel @Inject constructor(
                     )
                 }
             }
+            // Sin destino no hay nada que recomendar "aquí".
+            loadExploreCards(null)
             return
         }
         val ctx = api.placeContext(gpsDestId, source = "destination")
@@ -399,6 +423,7 @@ class HomeViewModel @Inject constructor(
                 communityContext = ctx,
             )
         }
+        loadExploreCards(gpsDestId)
     }
 
     fun loadFeed() {
