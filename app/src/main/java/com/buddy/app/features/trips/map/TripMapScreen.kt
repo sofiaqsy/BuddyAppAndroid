@@ -137,9 +137,20 @@ fun TripMapScreen(
         val elegido = spots.firstOrNull { it.id == initialSpotId } ?: return@LaunchedEffect
         yaAplicoInicial = true
         selectedSpotId = elegido.id
-        // Centrado y con zoom de calle: el mapa tiene que responder "¿dónde
-        // queda?" sin que haya que buscarlo entre los demás marcadores.
-        mapRef?.controller?.animateTo(GeoPoint(elegido.lat, elegido.lng), 15.5, 400L)
+        // El mapa nace a la altura del destino y BAJA hasta el lugar. Aparecer
+        // ya encima no contaba nada: quien llega desde el carrusel no sabe
+        // dónde cae ese lugar dentro de la ciudad, y el propio acercamiento es
+        // lo que se lo dice.
+        //
+        // Esperando a que la vista exista: el AndroidView se crea al recibir el
+        // primer center, que llega con estos mismos datos, así que la primera
+        // vuelta del efecto suele encontrarse mapRef todavía en nulo.
+        var intentos = 0
+        while (mapRef == null && intentos < 20) {
+            kotlinx.coroutines.delay(50)
+            intentos++
+        }
+        mapRef?.controller?.animateTo(GeoPoint(elegido.lat, elegido.lng), ZoomLugar, DuracionZoomMs)
     }
 
     val selectedSpot = spots.firstOrNull { it.id == selectedSpotId }
@@ -223,30 +234,57 @@ fun TripMapScreen(
                         setTileSource(TileSourceFactory.MAPNIK)
                         setMultiTouchControls(true)
                         zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
-                        controller.setZoom(if (spots.isEmpty() || initialSpotId != null) 15.5 else 13.5)
+                        controller.setZoom(if (spots.isEmpty()) 15.0 else ZoomDestino)
                         controller.setCenter(center)
                         mapRef = this
                     }
                 },
                 update = { map ->
-                    map.overlays.removeAll { it is Marker }
+                    map.overlays.removeAll { it is Marker || it is org.osmdroid.views.overlay.MapEventsOverlay }
+                    // Tocar el mapa vacío cierra la ficha (como iOS): con la
+                    // ficha abierta, el mapa es lo que queda "detrás", y tocar
+                    // el fondo es el gesto natural para volver.
+                    map.overlays.add(
+                        org.osmdroid.views.overlay.MapEventsOverlay(
+                            object : org.osmdroid.events.MapEventsReceiver {
+                                override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
+                                    if (selectedSpotId != null) { selectedSpotId = null; return true }
+                                    return false
+                                }
+                                override fun longPressHelper(p: GeoPoint?) = false
+                            },
+                        ),
+                    )
                     val markerSpots = spots.ifEmpty {
                         if (destLat != null && destLng != null) {
                             listOf(ApiGuideSpot(id = "dest", name = destName, lat = destLat, lng = destLng))
                         } else emptyList()
                     }
-                    markerSpots.forEach { spot ->
+                    // El elegido se dibuja al FINAL: osmdroid pinta en orden, y
+                    // siendo el más grande es el que no puede quedar debajo de
+                    // otro.
+                    markerSpots.sortedBy { it.id == selectedSpotId }.forEach { spot ->
+                        val elegido = spot.id == selectedSpotId
                         map.overlays.add(
                             Marker(map).apply {
                                 position = GeoPoint(spot.lat, spot.lng)
                                 title = spot.name
-                                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                                setOnMarkerClickListener { m, mv ->
+                                icon = pinDeLugar(map.context, spot.name, elegido)
+                                setAnchor(Marker.ANCHOR_CENTER, anclaVerticalDelPin(map.context, elegido))
+                                // Sin el globo de osmdroid: el nombre ya va en
+                                // el pin del elegido y la ficha de abajo cuenta
+                                // el resto.
+                                infoWindow = null
+                                setOnMarkerClickListener { _, _ ->
                                     // El marcador abre la MISMA ficha que la
                                     // tarjeta: tocar el pin y tocar la tarjeta
                                     // son la misma pregunta sobre el mismo sitio.
+                                    //
+                                    // Sin mover la cámara, a diferencia del
+                                    // rail: el pin que se acaba de tocar ya está
+                                    // a la vista y bajo el dedo, y recentrarlo
+                                    // lo movería justo donde el dedo lo suelta.
                                     selectedSpotId = spot.id
-                                    mv.controller.animateTo(m.position, 15.5, 400L)
                                     true
                                 }
                             },
@@ -359,7 +397,9 @@ fun TripMapScreen(
                         presenceText = presenceText,
                         onSelect = { elegido ->
                             selectedSpotId = elegido.id
-                            mapRef?.controller?.animateTo(GeoPoint(elegido.lat, elegido.lng), 15.5, 400L)
+                            mapRef?.controller?.animateTo(
+                                GeoPoint(elegido.lat, elegido.lng), ZoomLugar, DuracionZoomMs,
+                            )
                         },
                     )
                 }
@@ -371,6 +411,23 @@ fun TripMapScreen(
 /** Alto fijo del panel — el mismo con rail o con ficha, para que elegir un
  *  lugar no reacomode el mapa bajo el dedo. */
 private val PanelHeight = 258.dp
+
+/**
+ * ZOOM: LA CIUDAD Y LA CUADRA
+ *
+ * Dos alturas, y el viaje entre ellas es lo que se ve al elegir un lugar. Los
+ * valores salen de los de iOS, que son geográficos (MKCoordinateSpan) y no
+ * niveles de tesela: 0.012° para el conjunto y 0.004° —unos 450 m de alto de
+ * pantalla— para el lugar elegido. Sobre este viewport eso equivale a ~13.5 y
+ * ~18.5.
+ *
+ * Saltar de golpe deja al usuario preguntándose a dónde fue el mapa: la
+ * transición ES la explicación de que se acercó a un punto concreto del mismo
+ * sitio, así que va animada y no instantánea.
+ */
+private const val ZoomDestino = 13.5
+private const val ZoomLugar = 18.5
+private const val DuracionZoomMs = 600L
 
 @Composable
 private fun RailDeLugares(
