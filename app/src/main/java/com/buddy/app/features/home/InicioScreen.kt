@@ -280,10 +280,16 @@ fun InicioScreen(
 
         // ── Comunidad viva (recent help + pulse) ────────────────────────
         CommunityLiveSection(
-            recentHelp = state.recentHelp,
             communityPulse = state.communityPulse,
             isLoading = state.isLoadingCommunity,
             formatTimeAgo = viewModel::formatTimeAgo,
+            // Reutiliza la misma vía que el carrusel: quien contiene la
+            // pantalla sabe abrir el mapa de un destino, el Home no.
+            onOpenDestination = { destinationId, nombre ->
+                onOpenPlace(ApiPlaceCard(id = destinationId, name = nombre,
+                                         destinationId = destinationId,
+                                         destinationName = nombre))
+            },
             modifier = Modifier.padding(bottom = Spacing.lg),
         )
 

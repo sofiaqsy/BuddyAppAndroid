@@ -7,7 +7,6 @@ import com.buddy.app.core.data.model.ApiJourney
 import com.buddy.app.core.data.model.ApiPlaceCard
 import com.buddy.app.core.data.model.ApiPlaceContext
 import com.buddy.app.core.data.model.ApiPulseItem
-import com.buddy.app.core.data.model.ApiRecentHelp
 import com.buddy.app.core.location.LocationProvider
 import com.buddy.app.features.authentication.data.TravelerRepository
 import com.buddy.app.features.home.data.HomeApi
@@ -88,7 +87,6 @@ class HomeViewModel @Inject constructor(
          *  la búsqueda pudo arrancar en otra pantalla. */
         val openRequestCategory: String? = null,
         // MARK: – Comunidad viva
-        val recentHelp: List<ApiRecentHelp> = emptyList(),  // actividad local en destino
         val communityPulse: List<ApiPulseItem> = emptyList(), // pulso global (fallback)
         val isLoadingCommunity: Boolean = false,
         // MARK: – Selector de contexto Home (Ubicación actual vs Mi viaje)
@@ -441,33 +439,24 @@ class HomeViewModel @Inject constructor(
     }
 
     /**
-     * Carga comunidad viva. Regla: la actividad local SOLO aplica cuando el
-     * contexto EFECTIVO es "Mi viaje" (no solo "hay un trip creado" — con
-     * "Ubicación actual" elegida, mostrar la actividad de un trip que no es
-     * el que se está usando ahora mismo confunde); en cualquier otro caso →
-     * siempre el pulso global (top viajeros por lugar).
+     * Comunidad viva: SIEMPRE el pulso global (espejo de iOS).
+     *
+     * Antes anteponía la actividad local del destino del trip y solo caía al
+     * pulso si no había ninguna. Se abandonó esa regla: la sección existe para
+     * mostrar que la red está viva, y con la actividad local decía justo lo
+     * contrario en los destinos tranquilos —que es donde más falta hace—,
+     * además de cambiar de contenido al cambiar de selector sin que nada en la
+     * sección explicara por qué.
      */
     private suspend fun loadCommunityLive() {
         _state.update { it.copy(isLoadingCommunity = true) }
         try {
-            val destId = if (_state.value.effectiveTripJourney != null) _state.value.destinationId else null
-            if (destId != null) {
-                // Cargar actividad local del destino del trip
-                val recent = runCatching { api.recentHelpByPlace(destId) }.getOrDefault(emptyList())
-                if (recent.isNotEmpty()) {
-                    _state.update { it.copy(recentHelp = recent, isLoadingCommunity = false) }
-                    return
-                }
-            }
-            // Sin trip (o sin actividad local): limpiar restos de actividad y
-            // caer al pulso global
-            _state.update { it.copy(recentHelp = emptyList()) }
-            // Sin actividad local → cargar pulso global
             val pulse = runCatching { api.communityPulse() }.getOrNull()
-            if (pulse != null) {
-                _state.update { it.copy(communityPulse = pulse.items, isLoadingCommunity = false) }
-            } else {
-                _state.update { it.copy(isLoadingCommunity = false) }
+            _state.update {
+                it.copy(
+                    communityPulse = pulse?.items ?: it.communityPulse,
+                    isLoadingCommunity = false,
+                )
             }
         } catch (e: Exception) {
             Log.e(TAG, "loadCommunityLive failed", e)

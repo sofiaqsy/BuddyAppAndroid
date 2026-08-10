@@ -150,10 +150,33 @@ data class ApiRecentHelp(
 data class ApiPulseItem(
     val type: String,          // "traveling" | "helped" | "ready"
     val city: String,
+    /** El destino detrás de [city]. Con él, tocar el nombre abre su mapa; sin
+     *  él el nombre se muestra igual pero no navega. Los "traveling" no lo
+     *  llevan: se agrupan por nombre de ciudad. */
+    @SerialName("destination_id") val destinationId: String? = null,
     val count: Int? = null,
     val at: String? = null,
+    /** Enum crudo de help_request.category — el texto lo arma la vista. */
+    val category: String? = null,
+    /** Quién ayudó. Sin esto la fila no puede nombrar a nadie y decía
+     *  "un buddy ayudó a un viajero", que no es una persona, es una estadística. */
+    @SerialName("buddy_id") val buddyId: String? = null,
+    @SerialName("buddy_name") val buddyName: String? = null,
+    @SerialName("buddy_avatar_url") val buddyAvatarUrl: String? = null,
 ) {
-    val id: String get() = "$type-$city-${at ?: 0}"
+    val id: String get() = "$type-$city-${at ?: 0}-${buddyId ?: ""}"
+
+    companion object {
+        /** Filas de relleno para el esqueleto.
+         *
+         *  Con textos de largo realista: el redacted dibuja una barra del ancho
+         *  del texto, así que con marcadores cortos el bloque no reservaría el
+         *  alto real de dos líneas y todo saltaría al llegar los datos. */
+        fun placeholders(n: Int = 3): List<ApiPulseItem> = (0 until n).map { i ->
+            ApiPulseItem(type = "helped", city = "Ciudad", at = null,
+                         category = "general", buddyName = "Nombre")
+        }
+    }
 }
 
 @Serializable

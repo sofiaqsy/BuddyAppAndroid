@@ -69,6 +69,11 @@ object NetworkModule {
 
     @Provides
     @Singleton
+    fun provideMapApi(retrofit: Retrofit): com.buddy.app.features.trips.map.MapApi =
+        retrofit.create(com.buddy.app.features.trips.map.MapApi::class.java)
+
+    @Provides
+    @Singleton
     fun provideNotificationsApi(retrofit: Retrofit): com.buddy.app.core.data.NotificationsApi =
         retrofit.create(com.buddy.app.core.data.NotificationsApi::class.java)
 }
