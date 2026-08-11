@@ -130,6 +130,9 @@ fun TripMapScreen(
      *  referencia que el destinatario tendría que resolver. */
     var compartiendo by remember { mutableStateOf<com.buddy.app.core.data.model.ChatCard.Place?>(null) }
     var mapRef by remember { mutableStateOf<MapView?>(null) }
+    /** Buddy cuyo perfil se está mirando. A pantalla completa y por encima del
+     *  mapa: es otra pantalla, no una capa más de esta. */
+    var perfilDe by remember { mutableStateOf<ApiPlaceBuddy?>(null) }
 
     var yaAplicoInicial by remember { mutableStateOf(false) }
     LaunchedEffect(initialSpotId, spots) {
@@ -220,6 +223,16 @@ fun TripMapScreen(
 
     compartiendo?.let { tarjeta ->
         CompartirLugarSheet(card = tarjeta, onDismiss = { compartiendo = null })
+    }
+
+    perfilDe?.let { buddy ->
+        com.buddy.app.features.profile.UserProfileScreen(
+            travelerId = buddy.travelerId!!,
+            previewName = buddy.fullName,
+            previewAvatarUrl = buddy.avatarUrl,
+            onBack = { perfilDe = null },
+        )
+        return
     }
 
     DisposableEffect(Unit) { onDispose { mapRef?.onDetach() } }
@@ -373,6 +386,7 @@ fun TripMapScreen(
                         isLoadingFotos = isLoadingFotos,
                         buddies = buddies,
                         isLoadingBuddies = isLoadingBuddies,
+                        onOpenBuddy = { perfilDe = it },
                         onNavigate = { navigationTarget = spot },
                         onShare = {
                             compartiendo = com.buddy.app.core.data.model.ChatCard.Place(

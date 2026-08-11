@@ -147,6 +147,7 @@ fun PlaceGuideDetail(
     isLoadingFotos: Boolean,
     buddies: List<ApiPlaceBuddy>,
     isLoadingBuddies: Boolean,
+    onOpenBuddy: (ApiPlaceBuddy) -> Unit,
     onNavigate: () -> Unit,
     onShare: () -> Unit,
     onOpenPhoto: (FotoDeLugar) -> Unit,
@@ -251,7 +252,7 @@ fun PlaceGuideDetail(
         when (tab) {
             0 -> FotosTab(fotos, isLoadingFotos, onOpenPhoto)
             1 -> InfoTab(spot)
-            else -> BuddiesTab(buddies, isLoadingBuddies)
+            else -> BuddiesTab(buddies, isLoadingBuddies, onOpenBuddy)
         }
     }
 }
@@ -332,7 +333,11 @@ private fun InfoTab(spot: ApiGuideSpot) {
  * derecho de una fila dice, solo con asomarse, que hay más.
  */
 @Composable
-private fun BuddiesTab(buddies: List<ApiPlaceBuddy>, isLoading: Boolean) {
+private fun BuddiesTab(
+    buddies: List<ApiPlaceBuddy>,
+    isLoading: Boolean,
+    onOpenBuddy: (ApiPlaceBuddy) -> Unit,
+) {
     when {
         isLoading -> Box(Modifier.fillMaxWidth().padding(top = 30.dp), Alignment.Center) {
             CircularProgressIndicator(Modifier.size(22.dp), color = BuddyColor.Brand, strokeWidth = 2.dp)
@@ -346,8 +351,17 @@ private fun BuddiesTab(buddies: List<ApiPlaceBuddy>, isLoading: Boolean) {
             horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             items(buddies, key = { it.travelerId ?: it.fullName.orEmpty() }) { buddy ->
+                // La cara Y el nombre abren el perfil: son la misma persona, y
+                // acertar en una cara de 52dp con el dedo no siempre sale a la
+                // primera. Sin traveler_id no hay perfil que abrir, y entonces
+                // tampoco hay gesto — mejor que uno que no lleva a nada.
+                val navegable = buddy.travelerId != null
                 Column(
-                    Modifier.width(64.dp),
+                    Modifier
+                        .width(64.dp)
+                        .then(
+                            if (navegable) Modifier.clickable { onOpenBuddy(buddy) } else Modifier,
+                        ),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Box(

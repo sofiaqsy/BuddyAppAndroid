@@ -19,6 +19,19 @@ interface ProfileApi {
     @GET("users/me")
     suspend fun me(): ApiUser
 
+    /** El perfil PÚBLICO de otra persona. Mismo modelo que el propio: lo que
+     *  cambia no son los datos sino qué se puede hacer con ellos. */
+    @GET("users/{id}")
+    suspend fun user(@Path("id") travelerId: String): ApiUser
+
+    /** Lugares que recomienda — agrupados por lugar, no por viaje: documentar
+     *  un sitio tres veces no son tres recomendaciones. */
+    @GET("users/{id}/shares")
+    suspend fun shares(
+        @Path("id") travelerId: String,
+        @retrofit2.http.Query("limit") limit: Int = 12,
+    ): com.buddy.app.core.data.model.ApiPlaceCardsResponse
+
     @GET("users/{id}/stickers")
     suspend fun stickers(@Path("id") travelerId: String): List<ApiUserSticker>
 
@@ -116,7 +129,23 @@ data class ApiUser(
     val bio: String? = null,
     val nationality: String? = null,
     @SerialName("member_since") val memberSince: String? = null,
+    /** Quién es como buddy. Solo lo trae /users/:id (y /users/me). */
+    @SerialName("buddy_profile") val buddyProfile: ApiBuddyProfile? = null,
 )
+
+@Serializable
+data class ApiBuddyProfile(
+    @SerialName("is_available") val isAvailable: Boolean = false,
+    @SerialName("total_helps") val totalHelps: Int? = null,
+    /** Toda la cobertura, no solo el primer destino: hay buddies con seis, y
+     *  quedarse con `destination` decía que cubren mucho menos. */
+    val destinations: List<com.buddy.app.core.data.model.ApiDestinationRef>? = null,
+    val destination: com.buddy.app.core.data.model.ApiDestinationRef? = null,
+) {
+    val coverageNames: List<String>
+        get() = destinations?.takeIf { it.isNotEmpty() }?.map { it.name.ifEmpty { it.city } }
+            ?: listOfNotNull(destination?.let { it.name.ifEmpty { it.city } })
+}
 
 @Serializable
 data class ApiUserSticker(
