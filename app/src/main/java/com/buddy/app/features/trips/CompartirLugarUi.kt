@@ -26,6 +26,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.Place
+import com.buddy.app.features.home.data.ApiNearbySpot
+import com.buddy.app.features.home.data.ApiSpotCategoryRef
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -70,14 +82,21 @@ fun CompartirLugarCard(onTap: () -> Unit, modifier: Modifier = Modifier) {
 @Composable
 fun CompartirLugarSheet(
     step: ShareLugarStep,
-    searchResults: List<ApiPlaceResult>,
+    /** Spots curados a la redonda. SON las opciones del primer paso: si la fila
+     *  ya dice el nombre del local, tocarla ES la elección — una segunda
+     *  pantalla preguntando "¿en cuál estás?" repetiría lo que esa fila ya
+     *  respondió. */
+    nearbySpots: List<ApiNearbySpot>,
+    isPrefetchingNearby: Boolean,
+    searchResults: List<ApiNearbySpot>,
+    categories: List<ApiSpotCategoryRef>,
     isSubmitting: Boolean,
     errorMessage: String?,
     onDismiss: () -> Unit,
-    onUseCurrentLocation: () -> Unit,
-    onSearchInstead: () -> Unit,
+    onStep: (ShareLugarStep) -> Unit,
+    onPickSpot: (ApiNearbySpot) -> Unit,
     onQueryChange: (String) -> Unit,
-    onPickResult: (ApiPlaceResult) -> Unit,
+    onPropose: (nombre: String, categoriaId: String?) -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.padding(horizontal = Spacing.edge).padding(bottom = Spacing.lg)) {
@@ -88,13 +107,47 @@ fun CompartirLugarSheet(
                 ShareLugarStep.Choose -> {
                     Text("¿DÓNDE ESTÁS AHORA?", style = BuddyType.Eyebrow, color = BuddyColor.InkMuted)
                     Spacer(Modifier.height(Spacing.sm))
+
+                    nearbySpots.firstOrNull()?.let { actual ->
+                        optionRow(
+                            icon = Icons.Filled.LocationOn,
+                            title = "${actual.name} (Lugar actual)",
+                            subtitle = if (actual.estaPendiente) "${actual.distanciaLabel} · por revisar" else actual.distanciaLabel,
+                            isLoading = isSubmitting,
+                            enabled = !isSubmitting,
+                            onClick = { onPickSpot(actual) },
+                        )
+                        Spacer(Modifier.height(Spacing.sm))
+
+                        // Los demás dentro del radio: el GPS puede errar por unos
+                        // metros y dos locales caben en ese margen.
+                        nearbySpots.drop(1).take(4).forEach { spot ->
+                            optionRow(
+                                icon = Icons.Filled.Place,
+                                title = spot.name,
+                                subtitle = if (spot.estaPendiente) "${spot.distanciaLabel} · por revisar" else spot.distanciaLabel,
+                                isLoading = false,
+                                enabled = !isSubmitting,
+                                onClick = { onPickSpot(spot) },
+                            )
+                            Spacer(Modifier.height(Spacing.sm))
+                        }
+                    }
+
+                    // Siempre presente, haya lista o no: el buddy puede estar en
+                    // un local que el catálogo todavía no conoce, y buscarlo por
+                    // texto no sirve — si no está aquí, tampoco está en el mapa.
                     optionRow(
-                        icon = Icons.Filled.LocationOn,
-                        title = "Lugar actual",
-                        subtitle = "recomendado",
-                        isLoading = isSubmitting,
-                        enabled = !isSubmitting,
-                        onClick = onUseCurrentLocation,
+                        icon = Icons.Filled.AddCircle,
+                        title = "Registrar nuevo lugar",
+                        subtitle = when {
+                            nearbySpots.isNotEmpty() -> "ninguno de estos es"
+                            isPrefetchingNearby -> "buscando…"
+                            else -> "nombra dónde estás"
+                        },
+                        isLoading = false,
+                        enabled = !isSubmitting && !isPrefetchingNearby,
+                        onClick = { onStep(ShareLugarStep.Propose) },
                     )
                     Spacer(Modifier.height(Spacing.sm))
                     optionRow(
@@ -103,27 +156,57 @@ fun CompartirLugarSheet(
                         subtitle = null,
                         isLoading = false,
                         enabled = !isSubmitting,
-                        onClick = onSearchInstead,
+                        onClick = { onStep(ShareLugarStep.Search) },
                     )
                 }
+
                 ShareLugarStep.Search -> {
                     var query by remember { mutableStateOf("") }
                     BuddyTextField(
                         value = query,
                         onValueChange = { query = it; onQueryChange(it) },
-                        placeholder = "Buscar un lugar",
+                        placeholder = "Buscar en tus lugares",
                     )
                     Spacer(Modifier.height(Spacing.sm))
+
+                    if (query.trim().length >= 2 && searchResults.isEmpty()) {
+                        Column(
+                            Modifier.fillMaxWidth().padding(vertical = Spacing.lg),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
+                        ) {
+                            Text("Ningún lugar del catálogo coincide", style = BuddyType.Footnote, color = BuddyColor.InkMuted)
+                            Text(
+                                "Registrarlo como nuevo",
+                                style = BuddyType.FootnoteBold, color = BuddyColor.Ink,
+                                modifier = Modifier.clickable { onStep(ShareLugarStep.Propose) },
+                            )
+                        }
+                    }
+
                     LazyColumn(Modifier.height(320.dp)) {
-                        items(searchResults) { result ->
+                        items(searchResults, key = { it.id }) { spot ->
                             BuddyGroupedRow(
                                 modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.xs),
-                                onClick = { if (!isSubmitting) onPickResult(result) },
+                                onClick = { if (!isSubmitting) onPickSpot(spot) },
                             ) {
                                 Column {
-                                    Text(result.title, style = BuddyType.Body, color = BuddyColor.Ink)
-                                    result.subtitle?.let {
-                                        Text(it, style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+                                    Text(spot.name, style = BuddyType.Body, color = BuddyColor.Ink)
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Text(spot.distanciaLabel, style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+                                        if (spot.estaPendiente) {
+                                            Text(
+                                                "por revisar",
+                                                style = BuddyType.Caption2, color = BuddyColor.InkMuted,
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(50))
+                                                    .background(BuddyColor.InkMuted.copy(alpha = 0.12f))
+                                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -134,6 +217,92 @@ fun CompartirLugarSheet(
                             CircularProgressIndicator(modifier = Modifier.size(22.dp))
                         }
                     }
+                }
+
+                // Sin spots cerca: el buddy NOMBRA el lugar. Queda pendiente de
+                // aprobación en el admin, pero puede documentarlo desde ya.
+                ShareLugarStep.Propose -> {
+                    var nombre by remember { mutableStateOf("") }
+                    var categoriaId by remember { mutableStateOf<String?>(null) }
+
+                    Text("NO ENCONTRAMOS ESTE LUGAR", style = BuddyType.Eyebrow, color = BuddyColor.InkMuted)
+                    Spacer(Modifier.height(Spacing.sm))
+                    Text("¿Cómo se llama?", style = BuddyType.Title3, color = BuddyColor.Ink)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Escríbelo y lo agregamos al mapa de la comunidad después de revisarlo.",
+                        style = BuddyType.Footnote, color = BuddyColor.InkMuted,
+                    )
+                    Spacer(Modifier.height(Spacing.md))
+                    BuddyTextField(
+                        value = nombre,
+                        onValueChange = { nombre = it },
+                        placeholder = "Ej. Cafetería Rosal",
+                    )
+
+                    // La categoría la elige quien está viendo el local, así la
+                    // propuesta llega clasificada al admin en vez de tener que
+                    // adivinarla.
+                    if (categories.isNotEmpty()) {
+                        Spacer(Modifier.height(Spacing.md))
+                        Text("¿QUÉ TIPO DE LUGAR ES?", style = BuddyType.Eyebrow, color = BuddyColor.InkMuted)
+                        Spacer(Modifier.height(Spacing.sm))
+                        Row(
+                            Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                        ) {
+                            categories.forEach { categoria ->
+                                val elegida = categoriaId == categoria.id
+                                Text(
+                                    categoria.name,
+                                    style = BuddyType.Footnote,
+                                    color = if (elegida) BuddyColor.InkInverse else BuddyColor.Ink,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(if (elegida) BuddyColor.Ink else BuddyColor.Surface)
+                                        .border(
+                                            1.dp,
+                                            if (elegida) Color.Transparent else BuddyColor.Border,
+                                            RoundedCornerShape(50),
+                                        )
+                                        // Volver a tocar la misma categoría la deselecciona.
+                                        .clickable { categoriaId = if (elegida) null else categoria.id }
+                                        .padding(horizontal = Spacing.md, vertical = 9.dp),
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(Spacing.md))
+                    val listo = nombre.trim().isNotEmpty() && !isSubmitting
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(50))
+                            .background(if (listo) BuddyColor.Ink else BuddyColor.InkMuted)
+                            .clickable(enabled = listo) { onPropose(nombre, categoriaId) }
+                            .padding(vertical = 14.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (isSubmitting) {
+                            CircularProgressIndicator(
+                                Modifier.size(16.dp), strokeWidth = 2.dp, color = BuddyColor.InkInverse,
+                            )
+                            Spacer(Modifier.width(Spacing.sm))
+                        }
+                        Text("Compartir aquí", style = BuddyType.FootnoteBold, color = BuddyColor.InkInverse)
+                    }
+                    Spacer(Modifier.height(Spacing.sm))
+                    Text(
+                        "Buscar en el mapa",
+                        style = BuddyType.Footnote, color = BuddyColor.InkMuted,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onStep(ShareLugarStep.Search) }
+                            .padding(vertical = 4.dp),
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
                 }
             }
 
@@ -169,4 +338,4 @@ private fun optionRow(
     }
 }
 
-enum class ShareLugarStep { Choose, Search }
+enum class ShareLugarStep { Choose, Search, Propose }

@@ -66,6 +66,33 @@ interface HomeApi {
         @Query("lng") lng: Double? = null,
     ): com.buddy.app.core.data.model.ApiPlaceCardsResponse
 
+    /** Spots curados a la redonda — las OPCIONES de la primera pantalla de
+     *  "Compartir un lugar", así que se piden al abrirla y no al tocar nada. */
+    @GET("places/nearby")
+    suspend fun nearbySpots(
+        @Query("lat") lat: Double,
+        @Query("lng") lng: Double,
+        @Query("radius") radius: Int = 500,
+    ): NearbySpotsResponse
+
+    /** Búsqueda en el CATÁLOGO curado, no en OpenStreetMap: aquí se elige un
+     *  lugar que el buddy puede documentar. Con coordenadas, el backend pone
+     *  primero los de donde está parado. */
+    @GET("places/search")
+    suspend fun searchCuratedSpots(
+        @Query("q") q: String,
+        @Query("lat") lat: Double? = null,
+        @Query("lng") lng: Double? = null,
+    ): NearbySpotsResponse
+
+    @GET("places/categories")
+    suspend fun spotCategories(): SpotCategoriesResponse
+
+    /** Propone un lugar que el catálogo no tiene. Queda pendiente de revisión,
+     *  pero su autor puede documentarlo desde ya. */
+    @POST("places/propose")
+    suspend fun proposeSpot(@Body body: ProposeSpotBody): ApiSpotRef
+
     @GET("search/places")
     suspend fun searchPlaces(@Query("q") query: String): SearchResponse
 
@@ -174,3 +201,65 @@ data class SearchResponse(val items: List<ApiPlaceResult>)
 
 @Serializable
 data class DestinationsResponse(val items: List<com.buddy.app.core.data.model.ApiDestination>)
+
+
+@kotlinx.serialization.Serializable
+data class NearbySpotsResponse(val spots: List<ApiNearbySpot> = emptyList())
+
+@kotlinx.serialization.Serializable
+data class ApiNearbySpot(
+    val id: String,
+    val name: String,
+    val lat: Double? = null,
+    val lng: Double? = null,
+    @kotlinx.serialization.SerialName("cover_url") val coverUrl: String? = null,
+    @kotlinx.serialization.SerialName("destination_id") val destinationId: String? = null,
+    /** Nulo solo en /places/search sin coordenadas — /places/nearby siempre lo trae.
+     *
+     *  camelCase y no snake_case: este campo no es una columna, lo calcula la
+     *  ruta en JS. Declararlo como `distance_meters` lo dejaba siempre nulo y
+     *  las filas mostraban el nombre del destino donde va la distancia — que es
+     *  justo la pista que dice en cuál de los locales estás parado. */
+    val distanceMeters: Int? = null,
+    val destination: com.buddy.app.core.data.model.ApiDestinationRef? = null,
+    /** "approved" | "pending". Las pendientes salen a propósito: son lugares que
+     *  otro buddy ya propuso, y elegirlas evita duplicarlos. */
+    val status: String? = null,
+) {
+    val estaPendiente: Boolean get() = status == "pending"
+
+    /** "a 40 m" / "a 1,2 km" — la pista que necesita el buddy para saber en cuál
+     *  de los locales cercanos está parado. Sin distancia cae al nombre del
+     *  destino, que al menos ubica el resultado. */
+    val distanciaLabel: String
+        get() = when {
+            distanceMeters == null -> destination?.name ?: ""
+            distanceMeters < 1000 -> "a $distanceMeters m"
+            else -> "a %.1f km".format(distanceMeters / 1000.0)
+        }
+}
+
+@kotlinx.serialization.Serializable
+data class SpotCategoriesResponse(val categories: List<ApiSpotCategoryRef> = emptyList())
+
+@kotlinx.serialization.Serializable
+data class ApiSpotCategoryRef(val id: String, val name: String, val icon: String? = null)
+
+@kotlinx.serialization.Serializable
+data class ProposeSpotBody(
+    val name: String,
+    val lat: Double,
+    val lng: Double,
+    @kotlinx.serialization.SerialName("category_id") val categoryId: String? = null,
+)
+
+@kotlinx.serialization.Serializable
+data class ApiSpotRef(
+    val id: String,
+    val name: String,
+    val lat: Double? = null,
+    val lng: Double? = null,
+    @kotlinx.serialization.SerialName("destination_id") val destinationId: String? = null,
+    @kotlinx.serialization.SerialName("cover_url") val coverUrl: String? = null,
+    val status: String? = null,
+)

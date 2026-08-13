@@ -46,7 +46,12 @@ class TripsViewModel @Inject constructor(
         // trip" a propósito: son dos sheets distintos, no deben compartir
         // resultados de búsqueda ni flags de carga entre sí.
         val showShareLugarSheet: Boolean = false,
-        val shareLugarSearchResults: List<ApiPlaceResult> = emptyList(),
+        val shareLugarSearchResults: List<com.buddy.app.features.home.data.ApiNearbySpot> = emptyList(),
+        /** Spots curados a la redonda: SON las opciones de la primera pantalla,
+         *  así que se piden al abrir la hoja y no al tocar un botón. */
+        val nearbySpots: List<com.buddy.app.features.home.data.ApiNearbySpot> = emptyList(),
+        val isPrefetchingNearby: Boolean = false,
+        val spotCategories: List<com.buddy.app.features.home.data.ApiSpotCategoryRef> = emptyList(),
         val isSharingLugar: Boolean = false,
         val shareLugarError: String? = null,
         /** One-shot: la pantalla lo consume (abre el editor Memoir) y lo limpia. */
@@ -201,8 +206,73 @@ class TripsViewModel @Inject constructor(
 
     private var shareLugarSearchJob: Job? = null
 
-    fun openShareLugar() = _state.update {
-        it.copy(showShareLugarSheet = true, shareLugarSearchResults = emptyList(), shareLugarError = null)
+    fun openShareLugar() {
+        _state.update {
+            it.copy(showShareLugarSheet = true, shareLugarSearchResults = emptyList(), shareLugarError = null)
+        }
+        prefetchNearby()
+    }
+
+    /**
+     * Consulta el catálogo al ABRIR la hoja, no al tocar un botón: los locales
+     * cercanos son las opciones de la primera pantalla, así que tienen que
+     * estar antes de pintarla. En paralelo trae las categorías, que hacen falta
+     * en el único camino que sigue: nombrar un lugar que no existe.
+     */
+    private fun prefetchNearby() {
+        viewModelScope.launch {
+            _state.update { it.copy(isPrefetchingNearby = true) }
+            val loc = locationProvider.currentLocation()
+            if (loc == null) {
+                _state.update { it.copy(isPrefetchingNearby = false) }
+                return@launch
+            }
+            val spots = runCatching { api.nearbySpots(loc.lat, loc.lng).spots }.getOrDefault(emptyList())
+            val cats = runCatching { api.spotCategories().categories }.getOrDefault(emptyList())
+            _state.update {
+                it.copy(nearbySpots = spots, spotCategories = cats, isPrefetchingNearby = false)
+            }
+        }
+    }
+
+    /** Propone el lugar (el spot SÍ se crea: el admin lo revisa exista o no una
+     *  recomendación) y sigue al editor con él. */
+    fun proposeSpot(nombre: String, categoriaId: String?) {
+        if (_state.value.isSharingLugar) return
+        viewModelScope.launch {
+            _state.update { it.copy(isSharingLugar = true, shareLugarError = null) }
+            val loc = locationProvider.currentLocation()
+            if (loc == null) {
+                _state.update {
+                    it.copy(isSharingLugar = false,
+                            shareLugarError = "No pudimos obtener tu ubicación. Activa el GPS o busca el lugar manualmente.")
+                }
+                return@launch
+            }
+            runCatching {
+                val spot = api.proposeSpot(
+                    com.buddy.app.features.home.data.ProposeSpotBody(
+                        name = nombre.trim(), lat = loc.lat, lng = loc.lng, categoryId = categoriaId,
+                    ),
+                )
+                tripRepo.shareLugar(placeId = spot.id, lat = spot.lat, lng = spot.lng)
+            }.onSuccess { journey ->
+                _state.update {
+                    it.copy(isSharingLugar = false, showShareLugarSheet = false, sharedLugarJourney = journey)
+                }
+            }.onFailure { e ->
+                Log.e(TAG, "proposeSpot failed", e)
+                _state.update {
+                    it.copy(isSharingLugar = false,
+                            shareLugarError = "No pudimos registrar este lugar. Inténtalo de nuevo.")
+                }
+            }
+        }
+    }
+
+    /** Un spot del catálogo (cercano o buscado): ya existe, se documenta. */
+    fun pickSpot(spot: com.buddy.app.features.home.data.ApiNearbySpot) = shareLugar {
+        tripRepo.shareLugar(placeId = spot.id, lat = spot.lat, lng = spot.lng)
     }
     fun closeShareLugar() = _state.update { it.copy(showShareLugarSheet = false) }
 
@@ -214,8 +284,12 @@ class TripsViewModel @Inject constructor(
         }
         shareLugarSearchJob = viewModelScope.launch {
             delay(300)
-            runCatching { api.searchPlaces(query) }
-                .onSuccess { res -> _state.update { it.copy(shareLugarSearchResults = res.items) } }
+            // El catálogo curado y no OpenStreetMap: aquí se elige un lugar que
+            // el buddy PUEDE documentar. Con las coordenadas el backend pone
+            // primero los de donde está parado.
+            val loc = runCatching { locationProvider.currentLocation() }.getOrNull()
+            runCatching { api.searchCuratedSpots(query.trim(), loc?.lat, loc?.lng).spots }
+                .onSuccess { spots -> _state.update { it.copy(shareLugarSearchResults = spots) } }
                 .onFailure { Log.e(TAG, "shareLugarSearch failed", it) }
         }
     }
@@ -233,18 +307,6 @@ class TripsViewModel @Inject constructor(
         }
     }
 
-    fun shareSearchResult(place: ApiPlaceResult) = shareLugar {
-        when (place.source) {
-            "destination" -> tripRepo.shareLugar(destinationId = place.id)
-            "place" -> tripRepo.shareLugar(placeId = place.id, lat = place.lat, lng = place.lng)
-            else -> {
-                if (place.lat == null || place.lng == null) {
-                    error("Ese resultado no tiene coordenadas — prueba con otra búsqueda.")
-                }
-                tripRepo.shareLugar(lat = place.lat, lng = place.lng)
-            }
-        }
-    }
 
     private fun shareLugar(create: suspend () -> ApiJourney) {
         if (_state.value.isSharingLugar) return

@@ -151,19 +151,17 @@ fun YoScreen(
     if (tripsState.showShareLugarSheet) {
         com.buddy.app.features.trips.CompartirLugarSheet(
             step = shareLugarStep,
+            nearbySpots = tripsState.nearbySpots,
+            isPrefetchingNearby = tripsState.isPrefetchingNearby,
             searchResults = tripsState.shareLugarSearchResults,
+            categories = tripsState.spotCategories,
             isSubmitting = tripsState.isSharingLugar,
             errorMessage = tripsState.shareLugarError,
             onDismiss = tripsViewModel::closeShareLugar,
-            onUseCurrentLocation = {
-                locationPermissionLauncher.launch(arrayOf(
-                    android.Manifest.permission.ACCESS_COARSE_LOCATION,
-                    android.Manifest.permission.ACCESS_FINE_LOCATION,
-                ))
-            },
-            onSearchInstead = { shareLugarStep = com.buddy.app.features.trips.ShareLugarStep.Search },
+            onStep = { shareLugarStep = it },
+            onPickSpot = tripsViewModel::pickSpot,
             onQueryChange = tripsViewModel::shareLugarSearch,
-            onPickResult = tripsViewModel::shareSearchResult,
+            onPropose = tripsViewModel::proposeSpot,
         )
     }
 

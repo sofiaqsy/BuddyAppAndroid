@@ -243,19 +243,17 @@ fun TripsScreen(
     if (state.showShareLugarSheet) {
         CompartirLugarSheet(
             step = shareLugarStep,
+            nearbySpots = state.nearbySpots,
+            isPrefetchingNearby = state.isPrefetchingNearby,
             searchResults = state.shareLugarSearchResults,
+            categories = state.spotCategories,
             isSubmitting = state.isSharingLugar,
             errorMessage = state.shareLugarError,
             onDismiss = viewModel::closeShareLugar,
-            onUseCurrentLocation = {
-                locationPermissionLauncher.launch(arrayOf(
-                    Manifest.permission.ACCESS_COARSE_LOCATION,
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                ))
-            },
-            onSearchInstead = { shareLugarStep = ShareLugarStep.Search },
+            onStep = { shareLugarStep = it },
+            onPickSpot = viewModel::pickSpot,
             onQueryChange = viewModel::shareLugarSearch,
-            onPickResult = viewModel::shareSearchResult,
+            onPropose = viewModel::proposeSpot,
         )
     }
 
