@@ -159,6 +159,12 @@ interface HomeApi {
 data class CreateJourneyBody(
     @kotlinx.serialization.SerialName("destination_id") val destinationId: String? = null,
     @kotlinx.serialization.SerialName("place_id") val placeId: String? = null,
+    /** Un spot CURADO del catálogo — es lo que se elige en "Compartir un lugar".
+     *
+     *  Campo propio y no place_id: son tablas distintas. Mandando el id de un
+     *  spot como place_id, el backend seguía la rama de "place" y reventaba con
+     *  500 al no existir esa fila. */
+    @kotlinx.serialization.SerialName("spot_id") val spotId: String? = null,
     @kotlinx.serialization.SerialName("osm_id") val osmId: String? = null,
     val lat: Double? = null,
     val lng: Double? = null,

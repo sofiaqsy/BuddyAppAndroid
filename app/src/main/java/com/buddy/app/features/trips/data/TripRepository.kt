@@ -71,8 +71,20 @@ class TripRepository @Inject constructor(
      * en cascada que completa y publica TODO el trip. El backend ya exige
      * buddy aprobado — este método no duplica esa validación.
      */
-    suspend fun shareLugar(destinationId: String? = null, placeId: String? = null, lat: Double? = null, lng: Double? = null): ApiJourney =
-        api.createJourney(CreateJourneyBody(destinationId = destinationId, placeId = placeId, lat = lat, lng = lng, attachToTrip = false))
+    suspend fun shareLugar(
+        destinationId: String? = null,
+        placeId: String? = null,
+        /** El spot curado elegido en la hoja. Va en su propio campo: mandarlo
+         *  como place_id llevaba al backend por la rama equivocada. */
+        spotId: String? = null,
+        lat: Double? = null,
+        lng: Double? = null,
+    ): ApiJourney = api.createJourney(
+        CreateJourneyBody(
+            destinationId = destinationId, placeId = placeId, spotId = spotId,
+            lat = lat, lng = lng, attachToTrip = false,
+        ),
+    )
 
     companion object { private const val TAG = "TripRepo" }
 }

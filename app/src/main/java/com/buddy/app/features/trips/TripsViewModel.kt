@@ -255,7 +255,7 @@ class TripsViewModel @Inject constructor(
                         name = nombre.trim(), lat = loc.lat, lng = loc.lng, categoryId = categoriaId,
                     ),
                 )
-                tripRepo.shareLugar(placeId = spot.id, lat = spot.lat, lng = spot.lng)
+                tripRepo.shareLugar(spotId = spot.id, lat = spot.lat, lng = spot.lng)
             }.onSuccess { journey ->
                 _state.update {
                     it.copy(isSharingLugar = false, showShareLugarSheet = false, sharedLugarJourney = journey)
@@ -272,7 +272,7 @@ class TripsViewModel @Inject constructor(
 
     /** Un spot del catálogo (cercano o buscado): ya existe, se documenta. */
     fun pickSpot(spot: com.buddy.app.features.home.data.ApiNearbySpot) = shareLugar {
-        tripRepo.shareLugar(placeId = spot.id, lat = spot.lat, lng = spot.lng)
+        tripRepo.shareLugar(spotId = spot.id, lat = spot.lat, lng = spot.lng)
     }
     fun closeShareLugar() = _state.update { it.copy(showShareLugarSheet = false) }
 
