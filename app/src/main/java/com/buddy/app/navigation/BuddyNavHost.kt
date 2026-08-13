@@ -211,7 +211,31 @@ fun BuddyRoot() {
                 isApprovedBuddy = conexionesState.isApprovedBuddy,
             )
             AppTab.Conexiones -> ConexionesScreen(modifier, onOpenTrips = { selectedTab = AppTab.Trips })
-            AppTab.Yo -> YoScreen(modifier, onOpenTrips = { selectedTab = AppTab.Trips })
+            AppTab.Yo -> YoScreen(
+                modifier,
+                onOpenTrips = { selectedTab = AppTab.Trips },
+                onOpenPlace = { card ->
+                    val destId = card.destinationId
+                    if (destId != null) {
+                        mapSpotId = card.id.takeIf { it != destId }
+                        mapJourney = com.buddy.app.core.data.model.ApiJourney(
+                            id = card.id,
+                            title = card.destinationName ?: card.name,
+                            status = "active",
+                            destination = com.buddy.app.core.data.model.ApiDestinationRef(
+                                id = destId,
+                                name = card.destinationName ?: card.name,
+                                city = card.destinationName ?: card.name,
+                                lat = card.lat, lng = card.lng,
+                            ),
+                            destinationId = destId,
+                        )
+                    }
+                },
+                onOpenBook = { journey, page, isStandaloneShare ->
+                    bookJourney = Triple(journey, page, isStandaloneShare)
+                },
+            )
         }
         }
     }

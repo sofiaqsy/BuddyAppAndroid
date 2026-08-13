@@ -34,6 +34,9 @@ class YoViewModel @Inject constructor(
         val user: ApiUser? = null,
         val journeys: List<ApiJourney> = emptyList(),
         val stickers: List<ApiUserSticker> = emptyList(),
+        /** Los lugares que recomiendo — sección propia, aparte de los trips:
+         *  son aportes al catálogo de la comunidad, no viajes míos. */
+        val shares: List<com.buddy.app.core.data.model.ApiPlaceCard> = emptyList(),
         val buddyMe: ApiBuddyMe? = null,
         val isSavingBio: Boolean = false,
         val bioSaveFailed: Boolean = false,
@@ -75,6 +78,10 @@ class YoViewModel @Inject constructor(
                     val stickers = async { runCatching { api.stickers(myId) }.onFailure { Log.e(TAG, "stickers failed", it) }.getOrDefault(emptyList()) }
                     // buddy/me responde 403 para no verificados — se trata como "no buddy"
                     val buddy = async { runCatching { api.buddyMe() }.getOrNull() }
+                    val shares = async {
+                        runCatching { api.shares(myId).items }
+                            .onFailure { Log.e(TAG, "shares failed", it) }.getOrDefault(emptyList())
+                    }
                     _state.update {
                         it.copy(
                             isLoading = false,
@@ -82,6 +89,7 @@ class YoViewModel @Inject constructor(
                             journeys = trips.await(),
                             stickers = stickers.await(),
                             buddyMe = buddy.await(),
+                            shares = shares.await(),
                         )
                     }
                 }

@@ -92,9 +92,30 @@ import java.util.Locale
 fun YoScreen(
     modifier: Modifier = Modifier,
     onOpenTrips: () -> Unit = {},
+    /** Abre la ficha de un lugar que recomiendo, en el mapa de su destino. */
+    onOpenPlace: (com.buddy.app.core.data.model.ApiPlaceCard) -> Unit = {},
+    /** El editor de fotos del lugar recién elegido — el mismo del tab Tu trip. */
+    onOpenBook: (ApiJourney, Int, Boolean) -> Unit = { _, _, _ -> },
     viewModel: YoViewModel = hiltViewModel(),
     sessionViewModel: SessionViewModel = hiltViewModel(),
+    // El MISMO ViewModel que usa el tab Tu trip (scope de Activity): añadir un
+    // lugar es el mismo flujo, y duplicarlo aquí serían dos búsquedas y dos
+    // estados que se contradicen.
+    tripsViewModel: com.buddy.app.features.trips.TripsViewModel = hiltViewModel(),
 ) {
+    val tripsState by tripsViewModel.state.collectAsState()
+    var shareLugarStep by remember { mutableStateOf(com.buddy.app.features.trips.ShareLugarStep.Choose) }
+    val locationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants -> if (grants.values.any { it }) tripsViewModel.shareCurrentLocation() }
+    // El journey ya existe cuando llega esto: se abre el MISMO editor Memoir del
+    // flujo normal y se limpia el one-shot.
+    androidx.compose.runtime.LaunchedEffect(tripsState.sharedLugarJourney) {
+        tripsState.sharedLugarJourney?.let { journey ->
+            onOpenBook(journey, -1, true)
+            tripsViewModel.consumeSharedLugarJourney()
+        }
+    }
     val state by viewModel.state.collectAsState()
     val session by sessionViewModel.session.collectAsState()
     val isSigningIn by sessionViewModel.isSigningIn.collectAsState()
@@ -125,6 +146,25 @@ fun YoScreen(
     // Recargar cuando cambia la identidad del traveler (login/merge/logout).
     androidx.compose.runtime.LaunchedEffect(session?.travelerId, session?.isVerified) {
         if (session?.isVerified == true) viewModel.load()
+    }
+
+    if (tripsState.showShareLugarSheet) {
+        com.buddy.app.features.trips.CompartirLugarSheet(
+            step = shareLugarStep,
+            searchResults = tripsState.shareLugarSearchResults,
+            isSubmitting = tripsState.isSharingLugar,
+            errorMessage = tripsState.shareLugarError,
+            onDismiss = tripsViewModel::closeShareLugar,
+            onUseCurrentLocation = {
+                locationPermissionLauncher.launch(arrayOf(
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                ))
+            },
+            onSearchInstead = { shareLugarStep = com.buddy.app.features.trips.ShareLugarStep.Search },
+            onQueryChange = tripsViewModel::shareLugarSearch,
+            onPickResult = tripsViewModel::shareSearchResult,
+        )
     }
 
     // Selector de foto de perfil — espejo del PhotosPicker del avatar (iOS)
@@ -214,6 +254,26 @@ fun YoScreen(
             Spacer(Modifier.height(Spacing.xl))
             // 4 — Colección
             StickerSection(state)
+
+            // Visible si PUEDE aportar (necesita la entrada) o si ya aportó —
+            // a quien ya recomendó no se le esconde lo suyo aunque su
+            // verificación haya cambiado después.
+            val puedeRecomendar = state.buddyMe?.profile?.verificationStatus == "approved"
+            if (puedeRecomendar || state.shares.isNotEmpty()) {
+                // El pie de STICKERS es texto suelto, sin margen propio: sin
+                // esto el antetítulo se le pegaba y las dos secciones se leían
+                // como una.
+                Spacer(Modifier.height(Spacing.lg))
+                LugaresQueRecomiendasSection(
+                    shares = state.shares,
+                    puedeRecomendar = puedeRecomendar,
+                    onAdd = {
+                        shareLugarStep = com.buddy.app.features.trips.ShareLugarStep.Choose
+                        tripsViewModel.openShareLugar()
+                    },
+                    onOpenPlace = onOpenPlace,
+                )
+            }
             Spacer(Modifier.height(Spacing.xl))
             TripsSection(
                 state, onOpenTrips,
@@ -631,6 +691,90 @@ private fun SectionHeader(title: String, count: Int) {
     ) {
         Text(title, style = BuddyType.Eyebrow.copy(letterSpacing = 1.5.sp), color = BuddyColor.Ink)
         if (count > 0) Text("· $count", style = BuddyType.Eyebrow, color = BuddyColor.InkMuted)
+    }
+}
+
+/**
+ * Los lugares que recomiendo — espejo de sharesSection (iOS).
+ *
+ * Sección aparte de TRIPS a propósito: un viaje es una narración mía y un lugar
+ * recomendado es un aporte al catálogo de la comunidad.
+ */
+@Composable
+private fun LugaresQueRecomiendasSection(
+    shares: List<com.buddy.app.core.data.model.ApiPlaceCard>,
+    puedeRecomendar: Boolean,
+    onAdd: () -> Unit,
+    onOpenPlace: (com.buddy.app.core.data.model.ApiPlaceCard) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+        SectionHeader("LUGARES QUE RECOMIENDAS", shares.size)
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = Spacing.edge),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            // Siempre primero: es la ACCIÓN, no un elemento más de la colección.
+            // Al final habría que arrastrar toda la lista para encontrarla, y el
+            // recorrido crece con cada lugar que se suma.
+            if (puedeRecomendar) {
+                Column(
+                    Modifier
+                        .size(width = 119.dp, height = 142.dp)
+                        .clip(RoundedCornerShape(Radius.md))
+                        .background(BuddyColor.Surface)
+                        // Punteado: se lee como un hueco por llenar y no como un
+                        // lugar más ya aportado.
+                        .drawBehind {
+                            drawRoundRect(
+                                color = BuddyColor.Border,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(
+                                    width = 1.dp.toPx(),
+                                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                                        floatArrayOf(5.dp.toPx(), 4.dp.toPx()), 0f,
+                                    ),
+                                ),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(Radius.md.toPx()),
+                            )
+                        }
+                        .clickable(onClick = onAdd),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Icon(Icons.Filled.Add, null, Modifier.size(22.dp), tint = BuddyColor.Brand)
+                    Spacer(Modifier.height(8.dp))
+                    Text("Añadir lugar", style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+                }
+            }
+
+            shares.forEach { lugar ->
+                Column(
+                    Modifier
+                        .size(width = 119.dp, height = 142.dp)
+                        .clip(RoundedCornerShape(Radius.md))
+                        .background(BuddyColor.SurfaceRaised)
+                        .clickable { onOpenPlace(lugar) },
+                ) {
+                    Box(Modifier.fillMaxWidth().weight(1f)) {
+                        lugar.coverUrl?.let {
+                            coil.compose.AsyncImage(
+                                model = it, contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
+                    Column(Modifier.padding(horizontal = 8.dp, vertical = 7.dp)) {
+                        Text(lugar.name, style = BuddyType.Caption1, color = BuddyColor.Ink, maxLines = 1)
+                        // El pie es cuántas fotos aporté a ese lugar; los buddies
+                        // del destino no vienen al caso en mi propio perfil.
+                        Text(
+                            if (lugar.photoCount == 1) "1 foto" else "${lugar.photoCount} fotos",
+                            style = BuddyType.Caption2, color = BuddyColor.InkMuted, maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
