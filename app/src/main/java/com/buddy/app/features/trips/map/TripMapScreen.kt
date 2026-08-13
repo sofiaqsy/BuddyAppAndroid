@@ -43,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -223,16 +224,6 @@ fun TripMapScreen(
 
     compartiendo?.let { tarjeta ->
         CompartirLugarSheet(card = tarjeta, onDismiss = { compartiendo = null })
-    }
-
-    perfilDe?.let { buddy ->
-        com.buddy.app.features.profile.UserProfileScreen(
-            travelerId = buddy.travelerId!!,
-            previewName = buddy.fullName,
-            previewAvatarUrl = buddy.avatarUrl,
-            onBack = { perfilDe = null },
-        )
-        return
     }
 
     DisposableEffect(Unit) { onDispose { mapRef?.onDetach() } }
@@ -417,6 +408,38 @@ fun TripMapScreen(
                         },
                     )
                 }
+            }
+        }
+
+        // ── Perfil de un buddy ──────────────────────────────────────────────
+        //
+        // ENCIMA, no en lugar de.
+        //
+        // Antes esto salía con un `return` que sacaba el mapa de la
+        // composición, y al volver el mapa nacía otra vez: se perdía el zoom,
+        // la pestaña abierta y el lugar elegido. El estado de una pantalla no
+        // puede depender de si alguien miró un perfil y volvió.
+        //
+        // Se dibuja como capa opaca a pantalla completa y se come los toques:
+        // sin eso, tocar una zona vacía del perfil llegaría al mapa de detrás y
+        // movería algo que no se está viendo.
+        perfilDe?.let { buddy ->
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(BuddyColor.Canvas)
+                    .pointerInput(Unit) {},
+            ) {
+                // key por persona: con un solo ViewModel compartido, el segundo
+                // perfil se encontraba el primero ya cargado y mostraba a la
+                // persona equivocada.
+                com.buddy.app.features.profile.UserProfileScreen(
+                    travelerId = buddy.travelerId!!,
+                    previewName = buddy.fullName,
+                    previewAvatarUrl = buddy.avatarUrl,
+                    onBack = { perfilDe = null },
+                    vm = androidx.hilt.navigation.compose.hiltViewModel(key = buddy.travelerId),
+                )
             }
         }
     }

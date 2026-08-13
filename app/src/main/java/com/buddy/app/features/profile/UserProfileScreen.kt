@@ -363,13 +363,23 @@ private fun TarjetaDeBuddy(bp: ApiBuddyProfile, modifier: Modifier = Modifier) {
 
 @Composable
 private fun CeldaDeTrip(journey: ApiJourney, modifier: Modifier = Modifier) {
+    // 119:142 y no cuadrada: es la proporción de las tarjetas de "Lugares que
+    // recomienda", y las dos secciones son colecciones del mismo perfil — una
+    // cuadrada junto a otra vertical se leían como dos rejillas distintas.
     Box(
         modifier
-            .aspectRatio(1f)
+            .aspectRatio(119f / 142f)
             .clip(RoundedCornerShape(Radius.sm))
             .background(BuddyColor.SurfaceRaised),
     ) {
-        journey.coverUrl?.let {
+        // page_thumbs primero: es la portada REAL del viaje. coverUrl viene
+        // vacío en /users/:id/trips —el trip se arma agregando journeys— y
+        // quedarse solo con él dejaba la rejilla en gris. El destino es el
+        // último recurso.
+        val portada = journey.pageThumbs?.firstOrNull()
+            ?: journey.coverUrl
+            ?: journey.destination?.coverUrl
+        portada?.let {
             AsyncImage(
                 model = it, contentDescription = journey.title,
                 contentScale = ContentScale.Crop,
