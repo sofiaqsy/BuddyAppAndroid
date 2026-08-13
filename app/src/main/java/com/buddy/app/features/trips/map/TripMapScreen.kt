@@ -84,6 +84,9 @@ class TripMapViewModel @Inject constructor(
     suspend fun fotos(spotId: String): List<FotoDeLugar> =
         runCatching { mapApi.spotGallery(spotId).fotos() }.getOrDefault(emptyList())
 
+    suspend fun coordenadas(destinationId: String): Pair<Double, Double>? =
+        runCatching { mapApi.destination(destinationId).let { it.lat to it.lng } }.getOrNull()
+
     suspend fun buddies(destinationId: String): List<ApiPlaceBuddy> =
         runCatching { mapApi.destinationBuddies(destinationId).buddies }.getOrDefault(emptyList())
 }
@@ -112,9 +115,20 @@ fun TripMapScreen(
     viewModel: TripMapViewModel = hiltViewModel(),
 ) {
     val destName = journey.destination?.name ?: journey.title ?: "Trip"
-    val destLat = journey.destination?.lat
-    val destLng = journey.destination?.lng
     val destId = journey.destination?.id ?: journey.destinationId
+
+    // Las coordenadas del destino, pedidas solo si no vinieron. Llegando por un
+    // NOMBRE (la ciudad de comunidad viva, el destino de una historia) viaja el
+    // id y nada más, y sin ellas un destino sin lugares se anunciaba como "este
+    // lugar aún no tiene mapa" — de una ciudad que sí existe.
+    val coordsPedidas by produceState<Pair<Double, Double>?>(null, destId) {
+        val faltan = journey.destination?.lat == null || journey.destination.lng == null
+        value = if (faltan && destId != null) {
+            withContext(Dispatchers.IO) { viewModel.coordenadas(destId) }
+        } else null
+    }
+    val destLat = journey.destination?.lat ?: coordsPedidas?.first
+    val destLng = journey.destination?.lng ?: coordsPedidas?.second
 
     val spots by produceState(emptyList<ApiGuideSpot>(), destId) {
         value = if (destId != null) withContext(Dispatchers.IO) { viewModel.spots(destId) } else emptyList()

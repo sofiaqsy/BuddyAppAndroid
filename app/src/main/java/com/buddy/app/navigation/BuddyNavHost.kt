@@ -10,7 +10,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.background
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import com.buddy.app.core.designsystem.BuddyColor
 import com.buddy.app.features.conexiones.ConexionesScreen
 import com.buddy.app.features.home.InicioScreen
@@ -56,6 +60,13 @@ fun BuddyRoot() {
     /** El lugar que venía elegido al abrir el mapa, si se llegó tocando UNO
      *  concreto. Nulo cuando lo que se abrió es el destino entero. */
     var mapSpotId by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
+    /** Perfil de otra persona, como capa encima de la app.
+     *
+     *  Encima y no en lugar de: montarlo con un `return` desmontaría el tab de
+     *  debajo y volver reiniciaría su scroll y su estado. */
+    var perfilAbierto by androidx.compose.runtime.remember {
+        mutableStateOf<Triple<String, String?, String?>?>(null)
+    }
 
     // Mismo ViewModel (scope de Activity) que usa el tab Conexiones —
     // el badge refleja chatStore.totalUnread como en iOS.
@@ -132,6 +143,9 @@ fun BuddyRoot() {
         return
     }
 
+    // Box y no dos hermanos sueltos: el perfil se dibuja ENCIMA del Scaffold,
+    // tapando también la barra de tabs — es una pantalla, no un tab más.
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         containerColor = BuddyColor.Canvas,
         bottomBar = {
@@ -163,6 +177,7 @@ fun BuddyRoot() {
                 // El mapa del destino al que pertenece el lugar — el mismo que
                 // abre un trip. Sin destination_id no hay guía que abrir y el
                 // tap no hace nada, igual que en iOS.
+                onOpenProfile = { id, nombre, avatar -> perfilAbierto = Triple(id, nombre, avatar) },
                 onOpenPlace = { card ->
                     val destId = card.destinationId
                     if (destId != null) {
@@ -199,5 +214,29 @@ fun BuddyRoot() {
             AppTab.Yo -> YoScreen(modifier, onOpenTrips = { selectedTab = AppTab.Trips })
         }
         }
+    }
+
+    // El de debajo sigue compuesto, así que volver devuelve el Home tal como
+    // estaba: mismo scroll, mismo carrusel. Con un `return` —el patrón de las
+    // otras pantallas completas de aquí— se desmontaba y se reiniciaba.
+    //
+    // Se come los toques: si no, tocar una zona vacía del perfil llegaría a lo
+    // que hay detrás.
+    perfilAbierto?.let { (id, nombre, avatar) ->
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(BuddyColor.Canvas)
+                .pointerInput(Unit) {},
+        ) {
+            com.buddy.app.features.profile.UserProfileScreen(
+                travelerId = id,
+                previewName = nombre,
+                previewAvatarUrl = avatar,
+                onBack = { perfilAbierto = null },
+                vm = androidx.hilt.navigation.compose.hiltViewModel(key = id),
+            )
+        }
+    }
     }
 }

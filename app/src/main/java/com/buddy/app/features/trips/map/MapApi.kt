@@ -38,6 +38,14 @@ interface MapApi {
         @Query("limit") limit: Int = 20,
     ): ApiGalleryResponse
 
+    /** El destino, para sus COORDENADAS.
+     *
+     *  Hace falta cuando se llega por un nombre —la ciudad de comunidad viva, el
+     *  destino de una historia—: ahí solo viaja el id, y sin lat/lng el mapa
+     *  decía "este lugar aún no tiene mapa" de una ciudad que sí existe. */
+    @GET("destinations/{id}")
+    suspend fun destination(@Path("id") destinationId: String): com.buddy.app.core.data.model.ApiDestination
+
     @GET("destinations/{id}/buddies")
     suspend fun destinationBuddies(@Path("id") destinationId: String): ApiDestinationBuddiesResponse
 }

@@ -63,6 +63,9 @@ fun CommunityLiveSection(
     formatTimeAgo: (String?) -> String,
     /** Tocar el lugar abre su mapa. Nil-safe: sin destino no navega. */
     onOpenDestination: (destinationId: String, name: String) -> Unit,
+    /** Tocar a la persona abre su perfil. Sin buddy_id no hay perfil que abrir
+     *  y la fila se queda sin ese gesto. */
+    onOpenProfile: (travelerId: String, name: String?, avatarUrl: String?) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val ayudas = communityPulse.filter { it.type == "helped" }.take(3)
@@ -83,13 +86,21 @@ fun CommunityLiveSection(
             // viene detrás, que es el salto que se siente como "la pantalla se
             // reacomoda".
             isLoading && ayudas.isEmpty() ->
-                ApiPulseItem.placeholders().forEach { fila(it, formatTimeAgo, esEsqueleto = true) {} }
+                ApiPulseItem.placeholders().forEach {
+                    fila(it, formatTimeAgo, esEsqueleto = true, onTocarLugar = {}, onTocarPersona = {})
+                }
 
             ayudas.isNotEmpty() ->
                 ayudas.forEach { item ->
-                    fila(item, formatTimeAgo, esEsqueleto = false) {
-                        item.destinationId?.let { onOpenDestination(it, item.city) }
-                    }
+                    fila(
+                        item, formatTimeAgo, esEsqueleto = false,
+                        onTocarLugar = {
+                            item.destinationId?.let { onOpenDestination(it, item.city) }
+                        },
+                        onTocarPersona = {
+                            item.buddyId?.let { onOpenProfile(it, item.buddyName, item.buddyAvatarUrl) }
+                        },
+                    )
                 }
 
             // El tercer eslabón, que faltaba. Sin esta rama la sección se
@@ -121,6 +132,7 @@ private fun fila(
     formatTimeAgo: (String?) -> String,
     esEsqueleto: Boolean,
     onTocarLugar: () -> Unit,
+    onTocarPersona: () -> Unit,
 ) {
     val nombre = item.buddyName?.trim()?.split(" ")?.firstOrNull()
         ?.replaceFirstChar { it.uppercaseChar() } ?: "Un buddy"
@@ -139,8 +151,20 @@ private fun fila(
         // comunica eso en 100 ms —ningún texto lo hace igual de rápido— aunque
         // a este tamaño no se distingan los rasgos. Solo baja lo suficiente
         // para no encabezar la fila.
+        // La cara Y la frase llevan al perfil de quien ayudó; el lugar, al
+        // mapa. La hora no navega: hace falta una zona muerta para poder leer
+        // la fila sin disparar nada.
+        val personaNavegable = item.buddyId != null && !esEsqueleto
+        val gestoPersona = if (personaNavegable) {
+            Modifier.clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+                onClick = onTocarPersona,
+            )
+        } else Modifier
+
         Box(
-            Modifier.size(24.dp).clip(CircleShape).background(BuddyColor.SurfaceRaised),
+            Modifier.size(24.dp).clip(CircleShape).background(BuddyColor.SurfaceRaised).then(gestoPersona),
             contentAlignment = Alignment.Center,
         ) {
             if (item.buddyAvatarUrl != null && !esEsqueleto) {
@@ -171,6 +195,10 @@ private fun fila(
                 },
                 style = BuddyType.Footnote,
                 maxLines = 2,
+                // La frase entera y no solo el nombre: va concatenada con la
+                // acción en un mismo Text para que fluya y parta de línea sola,
+                // y dentro de un Text no se puede hacer tocable un tramo.
+                modifier = gestoPersona,
             )
 
             // Hora y lugar en extremos opuestos: la fila cierra tocando ambos

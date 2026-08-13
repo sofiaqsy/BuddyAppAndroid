@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -102,6 +103,9 @@ fun InicioScreen(
     /** Abre el lugar del carrusel en el mapa de su destino. Lo resuelve quien
      *  contiene la pantalla: el Home no conoce rutas, igual que en iOS. */
     onOpenPlace: (ApiPlaceCard) -> Unit = {},
+    /** Abre el perfil de una persona: quien ayudó en Comunidad viva, o quien
+     *  publicó una historia. */
+    onOpenProfile: (travelerId: String, name: String?, avatarUrl: String?) -> Unit = { _, _, _ -> },
     /** "Consultar en X" — abre la conversación a pantalla completa. La monta
      *  quien contiene esta pantalla, fuera del Scaffold: dentro quedaría la
      *  barra de tabs asomando y no se leería como el chat que es. */
@@ -290,6 +294,7 @@ fun InicioScreen(
                                          destinationId = destinationId,
                                          destinationName = nombre))
             },
+            onOpenProfile = onOpenProfile,
             modifier = Modifier.padding(bottom = Spacing.lg),
         )
 
@@ -299,6 +304,12 @@ fun InicioScreen(
             isLoading = state.isLoadingFeed,
             failed = state.feedFailed,
             onRetry = viewModel::loadFeed,
+            onOpenProfile = onOpenProfile,
+            onOpenDestination = { destinationId, nombre ->
+                onOpenPlace(ApiPlaceCard(id = destinationId, name = nombre,
+                                         destinationId = destinationId,
+                                         destinationName = nombre))
+            },
         )
         Spacer(Modifier.height(100.dp))
     }
@@ -651,6 +662,8 @@ private fun CommunitySection(
     isLoading: Boolean,
     failed: Boolean,
     onRetry: () -> Unit,
+    onOpenProfile: (travelerId: String, name: String?, avatarUrl: String?) -> Unit,
+    onOpenDestination: (destinationId: String, name: String) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.lg)) {
         Text(
@@ -682,7 +695,12 @@ private fun CommunitySection(
             }
             isLoading && stories.isEmpty() -> BuddyLoading(Modifier.height(200.dp))
             else -> stories.forEach { story ->
-                PublishedTripCard(story, Modifier.padding(horizontal = Spacing.edge))
+                PublishedTripCard(
+                    story,
+                    onOpenProfile = onOpenProfile,
+                    onOpenDestination = onOpenDestination,
+                    modifier = Modifier.padding(horizontal = Spacing.edge),
+                )
             }
         }
     }
@@ -690,7 +708,17 @@ private fun CommunitySection(
 
 /** Espejo de PublishedTripCard (iOS): carrusel con scrim, nombre, dots, footer. */
 @Composable
-private fun PublishedTripCard(story: ApiJourney, modifier: Modifier = Modifier) {
+private fun PublishedTripCard(
+    story: ApiJourney,
+    /** La cara y el nombre llevan al perfil del autor; el resto del pie sigue
+     *  abriendo la historia. Mismo reparto que en Comunidad viva: quien toca a
+     *  una persona quiere ver a esa persona. */
+    onOpenProfile: (travelerId: String, name: String?, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    /** El nombre del destino abre su mapa — mismo gesto que en Comunidad viva.
+     *  Nil-safe: sin destination_id no hay guía que abrir y no hay gesto. */
+    onOpenDestination: (destinationId: String, name: String) -> Unit = { _, _ -> },
+    modifier: Modifier = Modifier,
+) {
     val thumbs = story.pageThumbs.orEmpty().ifEmpty { listOfNotNull(story.coverUrl) }
     val destName = story.destination?.name ?: story.title ?: ""
     val authorName = TravelerAlias.displayName(story.users?.fullName, story.users?.id)
@@ -719,11 +747,21 @@ private fun PublishedTripCard(story: ApiJourney, modifier: Modifier = Modifier) 
                         .height(64.dp)
                         .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.38f), Color.Transparent))),
                 )
+                val destinoId = story.destination?.id ?: story.destinationId
                 Text(
                     destName,
                     style = BuddyType.FootnoteBold,
                     color = Color.White,
-                    modifier = Modifier.padding(start = 14.dp, top = 12.dp),
+                    modifier = Modifier
+                        .padding(start = 14.dp, top = 12.dp)
+                        .then(
+                            if (destinoId != null) {
+                                Modifier.clickable(
+                                    indication = null,
+                                    interactionSource = remember { MutableInteractionSource() },
+                                ) { onOpenDestination(destinoId, destName) }
+                            } else Modifier,
+                        ),
                 )
                 if (thumbs.size > 1) {
                     Row(
@@ -748,8 +786,20 @@ private fun PublishedTripCard(story: ApiJourney, modifier: Modifier = Modifier) 
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            BuddyAvatar(imageUrl = story.users?.avatarUrl, name = authorName, size = 24.dp)
-            Text(authorName, style = BuddyType.Footnote, color = BuddyColor.Ink, modifier = Modifier.weight(1f))
+            val autorId = story.users?.id
+            val gestoAutor = if (autorId != null) {
+                Modifier.clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                ) { onOpenProfile(autorId, story.users?.fullName, story.users?.avatarUrl) }
+            } else Modifier
+            Box(gestoAutor) {
+                BuddyAvatar(imageUrl = story.users?.avatarUrl, name = authorName, size = 24.dp)
+            }
+            Text(
+                authorName, style = BuddyType.Footnote, color = BuddyColor.Ink,
+                modifier = Modifier.weight(1f).then(gestoAutor),
+            )
             durationLine(story)?.let {
                 Text(it, style = BuddyType.Subhead, color = BuddyColor.InkMuted)
             }
