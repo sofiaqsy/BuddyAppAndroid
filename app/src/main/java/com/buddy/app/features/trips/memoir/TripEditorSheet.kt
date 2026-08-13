@@ -81,7 +81,9 @@ fun TripEditorSheet(
     }
 
     if (book.isEditing) {
-        TripCanvasEditor(book)
+        // isStandaloneShare ES el caso de la recomendación: se entró desde
+        // "Compartir un lugar" y lo que se guarda tiene que quedar publicado.
+        TripCanvasEditor(book, publicaAlGuardar = isStandaloneShare)
     }
 
     if (showShareConfirm) {

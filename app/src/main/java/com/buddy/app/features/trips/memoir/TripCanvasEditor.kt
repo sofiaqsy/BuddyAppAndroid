@@ -36,6 +36,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.ArrowCircleUp
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
@@ -116,7 +117,18 @@ private val borderPalette: List<Pair<String, Long>> = listOf(
  * paneles de bordes/marcos/layouts, cámara y galería.
  */
 @Composable
-fun TripCanvasEditor(book: TripBookState) {
+fun TripCanvasEditor(
+    book: TripBookState,
+    /**
+     * El editor se abrió para documentar un LUGAR recomendado, no una página
+     * más de un trip.
+     *
+     * Guardar no alcanza ahí: la foto tiene que quedar publicada o el lugar no
+     * la muestra. El botón cambia de nombre porque cambia lo que hace — decir
+     * "Guardar" y además publicar sería mentir sobre el alcance de ese toque.
+     */
+    publicaAlGuardar: Boolean = false,
+) {
     val canvas = book.editingCanvas
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -425,7 +437,7 @@ fun TripCanvasEditor(book: TripBookState) {
                 }
             }
 
-            // Píldora principal: ← | Cámara | Galería | Guardar | →
+            // Píldora principal: ← | Cámara | Galería | Guardar/Publicar | →
             Row(
                 Modifier
                     .clip(RoundedCornerShape(50))
@@ -446,7 +458,11 @@ fun TripCanvasEditor(book: TripBookState) {
                     photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                 }
                 PillDivider()
-                PillAction(Icons.Filled.CheckCircle, "Guardar", tint = BuddyColor.Brand) {
+                PillAction(
+                    if (publicaAlGuardar) Icons.Filled.ArrowCircleUp else Icons.Filled.CheckCircle,
+                    if (publicaAlGuardar) "Publicar" else "Guardar",
+                    tint = BuddyColor.Brand,
+                ) {
                     activePanel = ActivePanel.NONE; book.exitEdit(pageW, pageH)
                 }
                 PillDivider()
