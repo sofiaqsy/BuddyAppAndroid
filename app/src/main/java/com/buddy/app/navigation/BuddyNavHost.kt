@@ -229,11 +229,16 @@ fun BuddyRoot() {
                 .background(BuddyColor.Canvas)
                 .pointerInput(Unit) {},
         ) {
+            // Mi propio perfil se muestra como la pantalla del tab Yo, que no
+            // trae flecha de volver: sin esto, el botón del sistema saldría de
+            // la app en vez de cerrar la capa.
+            androidx.activity.compose.BackHandler { perfilAbierto = null }
             com.buddy.app.features.profile.UserProfileScreen(
                 travelerId = id,
                 previewName = nombre,
                 previewAvatarUrl = avatar,
                 onBack = { perfilAbierto = null },
+                onOpenTrips = { perfilAbierto = null; selectedTab = AppTab.Trips },
                 vm = androidx.hilt.navigation.compose.hiltViewModel(key = id),
             )
         }

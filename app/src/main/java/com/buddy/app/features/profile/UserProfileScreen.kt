@@ -29,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -136,8 +137,29 @@ fun UserProfileScreen(
     previewName: String? = null,
     previewAvatarUrl: String? = null,
     onBack: () -> Unit,
+    /** A dónde llevan las acciones del perfil PROPIO. Solo se usa cuando el
+     *  perfil abierto resulta ser el mío. */
+    onOpenTrips: () -> Unit = {},
     vm: UserProfileViewModel = hiltViewModel(),
+    sessionVm: com.buddy.app.features.authentication.SessionViewModel = hiltViewModel(),
 ) {
+    // MI PERFIL NO SE MIRA, SE EDITA
+    //
+    // El perfil público es de solo lectura a propósito: sobre otra persona no
+    // hay nada que hacer salvo ver lo que aportó. Pero se llega a él tocando
+    // caras —comunidad viva, historias, buddies de un lugar— y una de esas
+    // caras puede ser la propia. Ahí la misma pantalla se vuelve una versión
+    // recortada de algo que sí es tuyo: sin cambiar el avatar, sin bio, sin
+    // gestionar tu perfil de buddy.
+    //
+    // Así que si el perfil es el mío, es el mío: la pantalla del tab Yo, la de
+    // verdad.
+    val session by sessionVm.session.collectAsState()
+    if (session?.travelerId == travelerId) {
+        YoScreen(onOpenTrips = onOpenTrips)
+        return
+    }
+
     LaunchedEffect(travelerId) { vm.cargar(travelerId) }
     val state = vm.state
     val nombre = state.user?.fullName ?: previewName ?: "Buddy"

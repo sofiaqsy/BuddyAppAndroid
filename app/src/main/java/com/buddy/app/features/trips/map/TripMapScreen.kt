@@ -447,7 +447,11 @@ fun TripMapScreen(
                 // key por persona: con un solo ViewModel compartido, el segundo
                 // perfil se encontraba el primero ya cargado y mostraba a la
                 // persona equivocada.
-                com.buddy.app.features.profile.UserProfileScreen(
+                // Mi propio perfil se muestra como la pantalla del tab Yo, que no
+            // trae flecha de volver: sin esto, el botón del sistema saldría de
+            // la app en vez de cerrar la capa.
+            androidx.activity.compose.BackHandler { perfilDe = null }
+            com.buddy.app.features.profile.UserProfileScreen(
                     travelerId = buddy.travelerId!!,
                     previewName = buddy.fullName,
                     previewAvatarUrl = buddy.avatarUrl,
