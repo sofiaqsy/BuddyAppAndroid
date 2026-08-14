@@ -51,6 +51,8 @@ class TripsViewModel @Inject constructor(
          *  así que se piden al abrir la hoja y no al tocar un botón. */
         val nearbySpots: List<com.buddy.app.features.home.data.ApiNearbySpot> = emptyList(),
         val isPrefetchingNearby: Boolean = false,
+        /** Lugar elegido en la hoja. One-shot para navegar: NO se creó nada. */
+        val lugarElegido: com.buddy.app.features.home.data.ApiNearbySpot? = null,
         val spotCategories: List<com.buddy.app.features.home.data.ApiSpotCategoryRef> = emptyList(),
         val isSharingLugar: Boolean = false,
         val shareLugarError: String? = null,
@@ -249,16 +251,25 @@ class TripsViewModel @Inject constructor(
                 }
                 return@launch
             }
+            // El spot SÍ se propone: es el lugar en sí, y el admin lo tiene que
+            // revisar exista o no una recomendación. Lo que no se crea aquí es
+            // el journey — ése nace al publicar la primera foto.
             runCatching {
-                val spot = api.proposeSpot(
+                api.proposeSpot(
                     com.buddy.app.features.home.data.ProposeSpotBody(
                         name = nombre.trim(), lat = loc.lat, lng = loc.lng, categoryId = categoriaId,
                     ),
                 )
-                tripRepo.shareLugar(spotId = spot.id, lat = spot.lat, lng = spot.lng)
-            }.onSuccess { journey ->
+            }.onSuccess { spot ->
                 _state.update {
-                    it.copy(isSharingLugar = false, showShareLugarSheet = false, sharedLugarJourney = journey)
+                    it.copy(
+                        isSharingLugar = false, showShareLugarSheet = false,
+                        lugarElegido = com.buddy.app.features.home.data.ApiNearbySpot(
+                            id = spot.id, name = spot.name, lat = spot.lat, lng = spot.lng,
+                            coverUrl = spot.coverUrl, destinationId = spot.destinationId,
+                            status = spot.status,
+                        ),
+                    )
                 }
             }.onFailure { e ->
                 Log.e(TAG, "proposeSpot failed", e)
@@ -270,10 +281,22 @@ class TripsViewModel @Inject constructor(
         }
     }
 
-    /** Un spot del catálogo (cercano o buscado): ya existe, se documenta. */
-    fun pickSpot(spot: com.buddy.app.features.home.data.ApiNearbySpot) = shareLugar {
-        tripRepo.shareLugar(spotId = spot.id, lat = spot.lat, lng = spot.lng)
+    /**
+     * ELEGIR UN LUGAR NO ESCRIBE NADA.
+     *
+     * Antes esto creaba el journey en el acto, y quien se arrepentía dejaba uno
+     * vivo para siempre. Como en iOS, elegir solo lleva a la FICHA del lugar:
+     * ahí vive "Añadir foto", y publicar esa foto es lo que crea la
+     * recomendación. Elegir un lugar que ya es tuyo es pedir sumarle algo, no
+     * empezarlo de nuevo — y como la ficha es la misma, ese caso no necesita
+     * rama aparte.
+     */
+    fun pickSpot(spot: com.buddy.app.features.home.data.ApiNearbySpot) {
+        Log.d(TAG, "lugar elegido ${spot.id.take(8)} — sin crear nada todavía")
+        _state.update { it.copy(showShareLugarSheet = false, lugarElegido = spot) }
     }
+
+    fun consumeLugarElegido() = _state.update { it.copy(lugarElegido = null) }
     fun closeShareLugar() = _state.update { it.copy(showShareLugarSheet = false) }
 
     fun shareLugarSearch(query: String) {

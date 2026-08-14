@@ -60,6 +60,7 @@ import com.buddy.app.core.navigation.ComoLlegarDialog
 import com.buddy.app.features.home.data.HomeApi
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
@@ -74,6 +75,7 @@ import javax.inject.Inject
 class TripMapViewModel @Inject constructor(
     private val mapApi: MapApi,
     private val homeApi: HomeApi,
+    private val tripRepo: com.buddy.app.features.trips.data.TripRepository,
 ) : ViewModel() {
     suspend fun spots(destinationId: String): List<ApiGuideSpot> =
         runCatching { mapApi.guideSpots(destinationId).spots }.getOrDefault(emptyList())
@@ -86,6 +88,13 @@ class TripMapViewModel @Inject constructor(
 
     suspend fun coordenadas(destinationId: String): Pair<Double, Double>? =
         runCatching { mapApi.destination(destinationId).let { it.lat to it.lng } }.getOrNull()
+
+    /** La recomendación de un lugar: journey suelto (trip_id nulo) sobre el
+     *  spot. Nace al tocar "Añadir foto", no al elegir el lugar. */
+    suspend fun crearRecomendacion(spotId: String, lat: Double, lng: Double): ApiJourney? =
+        runCatching { tripRepo.shareLugar(spotId = spotId, lat = lat, lng = lng) }
+            .onFailure { android.util.Log.e("TripMap", "crearRecomendacion falló", it) }
+            .getOrNull()
 
     suspend fun buddies(destinationId: String): List<ApiPlaceBuddy> =
         runCatching { mapApi.destinationBuddies(destinationId).buddies }.getOrDefault(emptyList())
@@ -111,6 +120,11 @@ fun TripMapScreen(
      *  Home), no el destino. Se aplica UNA vez — si luego se cierra la ficha,
      *  el mapa se queda en la lista, que es lo que el gesto de cerrar pidió. */
     initialSpotId: String? = null,
+    /** Buddy aprobado: puede documentar lugares. Lo sabe quien contiene la
+     *  pantalla —ya lo consulta para el CTA de Tu trip— y no se vuelve a pedir. */
+    canRecommend: Boolean = false,
+    /** El editor de fotos, con el journey recién creado para este lugar. */
+    onOpenBook: (ApiJourney, Int, Boolean) -> Unit = { _, _, _ -> },
     onBack: () -> Unit,
     viewModel: TripMapViewModel = hiltViewModel(),
 ) {
@@ -145,6 +159,7 @@ fun TripMapScreen(
      *  referencia que el destinatario tendría que resolver. */
     var compartiendo by remember { mutableStateOf<com.buddy.app.core.data.model.ChatCard.Place?>(null) }
     var mapRef by remember { mutableStateOf<MapView?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     /** Buddy cuyo perfil se está mirando. A pantalla completa y por encima del
      *  mapa: es otra pantalla, no una capa más de esta. */
     var perfilDe by remember { mutableStateOf<ApiPlaceBuddy?>(null) }
@@ -391,6 +406,17 @@ fun TripMapScreen(
                         isLoadingFotos = isLoadingFotos,
                         buddies = buddies,
                         isLoadingBuddies = isLoadingBuddies,
+                        canRecommend = canRecommend,
+                        onAddPhoto = {
+                            // AQUÍ nace el journey, no al elegir el lugar: hasta
+                            // este toque el usuario solo estaba mirando la ficha.
+                            scope.launch {
+                                val journey = withContext(Dispatchers.IO) {
+                                    viewModel.crearRecomendacion(spot.id, spot.lat, spot.lng)
+                                }
+                                if (journey != null) onOpenBook(journey, -1, true)
+                            }
+                        },
                         onOpenBuddy = { perfilDe = it },
                         onNavigate = { navigationTarget = spot },
                         onShare = {

@@ -108,14 +108,26 @@ fun YoScreen(
     val locationPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions(),
     ) { grants -> if (grants.values.any { it }) tripsViewModel.shareCurrentLocation() }
-    // El journey ya existe cuando llega esto: se abre el MISMO editor Memoir del
-    // flujo normal y se limpia el one-shot.
-    androidx.compose.runtime.LaunchedEffect(tripsState.sharedLugarJourney) {
-        tripsState.sharedLugarJourney?.let { journey ->
-            onOpenBook(journey, -1, true)
-            tripsViewModel.consumeSharedLugarJourney()
+    // Elegir un lugar lleva a su FICHA (el mapa), donde vive "Añadir foto".
+    // No se creó nada todavía: publicar esa foto es lo que crea la
+    // recomendación.
+    androidx.compose.runtime.LaunchedEffect(tripsState.lugarElegido) {
+        tripsState.lugarElegido?.let { spot ->
+            onOpenPlace(
+                com.buddy.app.core.data.model.ApiPlaceCard(
+                    id = spot.id,
+                    name = spot.name,
+                    destinationId = spot.destinationId,
+                    destinationName = spot.destination?.name,
+                    lat = spot.lat, lng = spot.lng,
+                    coverUrl = spot.coverUrl,
+                    status = spot.status,
+                ),
+            )
+            tripsViewModel.consumeLugarElegido()
         }
     }
+
     val state by viewModel.state.collectAsState()
     val session by sessionViewModel.session.collectAsState()
     val isSigningIn by sessionViewModel.isSigningIn.collectAsState()

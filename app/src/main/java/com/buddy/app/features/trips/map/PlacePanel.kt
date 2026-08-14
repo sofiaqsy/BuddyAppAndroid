@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.Person
@@ -135,9 +136,9 @@ fun PlacePhotoCard(
  * como la respuesta a haber tocado el lugar, y el mapa sigue ahí detrás
  * mostrando dónde queda.
  *
- * Sin "añadir foto" todavía: Android no tiene el editor de recomendaciones, y
- * un botón que no lleva a ningún lado es peor que su ausencia. Compartir sí
- * está, por la hoja del sistema.
+ * "Añadir foto" vive en la pestaña Fotos y es la ÚNICA entrada para crear una
+ * recomendación: elegir un lugar en "Compartir un lugar" no escribe nada, solo
+ * trae aquí.
  */
 @Composable
 fun PlaceGuideDetail(
@@ -145,6 +146,11 @@ fun PlaceGuideDetail(
     presenceText: String?,
     fotos: List<FotoDeLugar>,
     isLoadingFotos: Boolean,
+    /** Puede documentar este lugar: buddy aprobado. La baldosa de añadir es la
+     *  ÚNICA entrada para crear una recomendación, así que sin ella un lugar
+     *  recién propuesto queda sin forma de documentarse. */
+    canRecommend: Boolean,
+    onAddPhoto: () -> Unit,
     buddies: List<ApiPlaceBuddy>,
     isLoadingBuddies: Boolean,
     onOpenBuddy: (ApiPlaceBuddy) -> Unit,
@@ -250,7 +256,7 @@ fun PlaceGuideDetail(
         HorizontalDivider(color = BuddyColor.Hairline)
 
         when (tab) {
-            0 -> FotosTab(fotos, isLoadingFotos, onOpenPhoto)
+            0 -> FotosTab(fotos, isLoadingFotos, canRecommend, onAddPhoto, onOpenPhoto)
             1 -> InfoTab(spot)
             else -> BuddiesTab(buddies, isLoadingBuddies, onOpenBuddy)
         }
@@ -261,6 +267,8 @@ fun PlaceGuideDetail(
 private fun FotosTab(
     fotos: List<FotoDeLugar>,
     isLoading: Boolean,
+    canRecommend: Boolean,
+    onAddPhoto: () -> Unit,
     onOpenPhoto: (FotoDeLugar) -> Unit,
 ) {
     when {
@@ -268,13 +276,34 @@ private fun FotosTab(
             CircularProgressIndicator(Modifier.size(22.dp), color = BuddyColor.Brand, strokeWidth = 2.dp)
         }
 
-        fotos.isEmpty() -> EstadoVacio("Todavía no hay fotos de este lugar")
+        fotos.isEmpty() && !canRecommend -> EstadoVacio("Todavía no hay fotos de este lugar")
 
         else -> LazyRow(
             Modifier.fillMaxWidth().padding(top = 16.dp),
             contentPadding = PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            // Primero y del mismo tamaño que las miniaturas: es la acción, no
+            // una foto más, y al final habría que deslizar toda la galería para
+            // encontrarla.
+            if (canRecommend) {
+                item(key = "añadir") {
+                    Column(
+                        Modifier
+                            .size(115.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(BuddyColor.Surface)
+                            .border(1.dp, BuddyColor.Border, RoundedCornerShape(10.dp))
+                            .clickable(onClick = onAddPhoto),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        Icon(Icons.Filled.Add, null, Modifier.size(22.dp), tint = BuddyColor.Brand)
+                        Spacer(Modifier.height(6.dp))
+                        Text("Añadir foto", style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+                    }
+                }
+            }
             itemsIndexed(fotos, key = { i, f -> "$i-${f.url}" }) { _, foto ->
                 AsyncImage(
                     model = foto.url,

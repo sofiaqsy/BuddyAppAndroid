@@ -77,6 +77,8 @@ fun TripsScreen(
      *  isStandaloneShare: true solo para "Compartir un lugar" (Fase 2) —
      *  publica solo al salir del editor, ver TripEditorSheet.kt. */
     onOpenBook: (ApiJourney, Int, Boolean) -> Unit = { _, _, _ -> },
+    /** La ficha del lugar recién elegido, en el mapa de su destino. */
+    onOpenPlace: (com.buddy.app.core.data.model.ApiPlaceCard) -> Unit = {},
     /** Abre el mapa del trip a pantalla completa (overlay en BuddyRoot, como iOS). */
     onOpenMap: (ApiJourney) -> Unit = {},
     /** Tras publicar: volver al Inicio (espejo de AppRouter.switchTo(.inicio)). */
@@ -97,14 +99,26 @@ fun TripsScreen(
     ) { grants ->
         if (grants.values.any { it }) viewModel.shareCurrentLocation()
     }
-    // El journey ya existe en el backend cuando llega esto — abrir el mismo
-    // editor Memoir del flujo normal y limpiar el one-shot.
-    androidx.compose.runtime.LaunchedEffect(state.sharedLugarJourney) {
-        state.sharedLugarJourney?.let { journey ->
-            onOpenBook(journey, -1, true)
-            viewModel.consumeSharedLugarJourney()
+    // Elegir un lugar lleva a su FICHA (el mapa), donde vive "Añadir foto".
+    // No se creó nada todavía: publicar esa foto es lo que crea la
+    // recomendación.
+    androidx.compose.runtime.LaunchedEffect(state.lugarElegido) {
+        state.lugarElegido?.let { spot ->
+            onOpenPlace(
+                com.buddy.app.core.data.model.ApiPlaceCard(
+                    id = spot.id,
+                    name = spot.name,
+                    destinationId = spot.destinationId,
+                    destinationName = spot.destination?.name,
+                    lat = spot.lat, lng = spot.lng,
+                    coverUrl = spot.coverUrl,
+                    status = spot.status,
+                ),
+            )
+            viewModel.consumeLugarElegido()
         }
     }
+
 
     // ── Publicar historia — gate de identidad + confirmación (espejo iOS) ──
     val context = androidx.compose.ui.platform.LocalContext.current

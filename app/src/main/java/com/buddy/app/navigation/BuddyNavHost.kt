@@ -104,6 +104,11 @@ fun BuddyRoot() {
         com.buddy.app.features.trips.map.TripMapScreen(
             journey = journey,
             initialSpotId = mapSpotId,
+            canRecommend = conexionesState.isApprovedBuddy,
+            onOpenBook = { j, page, isStandaloneShare ->
+                mapJourney = null; mapSpotId = null
+                bookJourney = Triple(j, page, isStandaloneShare)
+            },
             onBack = { mapJourney = null; mapSpotId = null },
         )
         return
@@ -204,6 +209,24 @@ fun BuddyRoot() {
             )
             AppTab.Trips -> TripsScreen(
                 modifier,
+                onOpenPlace = { card ->
+                    val destId = card.destinationId
+                    if (destId != null) {
+                        mapSpotId = card.id.takeIf { it != destId }
+                        mapJourney = com.buddy.app.core.data.model.ApiJourney(
+                            id = card.id,
+                            title = card.destinationName ?: card.name,
+                            status = "active",
+                            destination = com.buddy.app.core.data.model.ApiDestinationRef(
+                                id = destId,
+                                name = card.destinationName ?: card.name,
+                                city = card.destinationName ?: card.name,
+                                lat = card.lat, lng = card.lng,
+                            ),
+                            destinationId = destId,
+                        )
+                    }
+                },
                 onOpenConexiones = { selectedTab = AppTab.Conexiones },
                 onOpenBook = { journey, page, isStandaloneShare -> bookJourney = Triple(journey, page, isStandaloneShare) },
                 onOpenMap = { mapJourney = it; mapSpotId = null },
