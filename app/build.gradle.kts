@@ -25,8 +25,12 @@ android {
         applicationId = "com.vrcoffe.buddyapp"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.0.2"
+        // 1.0.4 y no 1.0.3: esta entrega trae lo mismo que la 1.0.4 de iOS
+        // (comunidad viva, perfiles, mapa con ficha de lugar, compartir). Que el
+        // número diga lo mismo en los dos lados es lo que permite responder "¿en
+        // qué versión estás?" sin traducir. Android nunca publicó una 1.0.3.
+        versionCode = 4
+        versionName = "1.0.4"
 
         buildConfigField("String", "API_BASE_URL", "\"https://buddy-core-504b393f8333.herokuapp.com/v1/\"")
         // Dominio público de los enlaces que se comparten fuera de la app. NO es
