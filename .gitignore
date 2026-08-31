@@ -8,3 +8,7 @@ local.properties
 # Firebase service account keys — nunca commitear
 *firebase-adminsdk*.json
 .kotlin/
+
+# Config de Firebase: local, nunca al repo
+google-services.json
+app/google-services.json
