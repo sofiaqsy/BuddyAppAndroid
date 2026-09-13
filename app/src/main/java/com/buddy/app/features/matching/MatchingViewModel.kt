@@ -23,6 +23,7 @@ import javax.inject.Inject
 class MatchingViewModel @Inject constructor(
     private val repo: MatchingRepository,
     private val tripRepo: com.buddy.app.features.trips.data.TripRepository,
+    private val locationProvider: com.buddy.app.core.location.LocationProvider,
 ) : ViewModel() {
 
     sealed interface SearchState {
@@ -98,6 +99,7 @@ class MatchingViewModel @Inject constructor(
                         destinationId = journey.destination?.id ?: journey.destinationId,
                         category = category,
                         journeyId = journey.id,
+                        lat = lat, lng = lng,
                     )
                 } catch (e: com.buddy.app.features.matching.data.ActiveRequestExists) {
                     // Solicitud huérfana previa: cancelarla y reintentar una vez —
@@ -109,6 +111,7 @@ class MatchingViewModel @Inject constructor(
                         destinationId = journey.destination?.id ?: journey.destinationId,
                         category = category,
                         journeyId = journey.id,
+                        lat = lat, lng = lng,
                     )
                 }
                 val city = cityName ?: "tu zona"
@@ -134,10 +137,16 @@ class MatchingViewModel @Inject constructor(
             // sobre una solicitud que está a punto de morir (la carrera del
             // "minimizo y vuelvo a pedir de inmediato").
             cancelJob?.join()
+            // Sin journey (consulta desde el Home) el punto consultado es donde
+            // está el viajero: el backend busca buddies que CUBREN ese punto.
+            // Con journey no: puede ser un viaje a otra ciudad.
+            val punto = if (journeyId == null) runCatching { locationProvider.currentLocation() }.getOrNull() else null
+            Log.d(TAG, "startRequest punto=${punto?.let { "(${it.lat},${it.lng})" } ?: "sin punto"} journey=${journeyId?.take(8)}")
             var retried = false
             while (true) {
                 try {
-                    val request = repo.createHelpRequest(destinationId, category, description, journeyId)
+                    val request = repo.createHelpRequest(destinationId, category, description, journeyId,
+                        lat = punto?.lat, lng = punto?.lng)
                     _state.value = SearchState.Searching(request.id, category)
                     startSse(request.id)
                     startRecoveryPoll(request.id)

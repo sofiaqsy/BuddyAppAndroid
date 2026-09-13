@@ -17,6 +17,17 @@ import retrofit2.http.Query
  */
 interface MapApi {
 
+    /** Lugares dentro del rectángulo visible del mapa, de cualquier destino
+     *  (mapa estilo Airbnb: al mover o hacer zoom se pide lo que hay en pantalla). */
+    @GET("places/in-bounds")
+    suspend fun spotsInBounds(
+        @Query("min_lat") minLat: Double,
+        @Query("min_lng") minLng: Double,
+        @Query("max_lat") maxLat: Double,
+        @Query("max_lng") maxLng: Double,
+        @Query("limit") limit: Int = 150,
+    ): ApiSpotsInBoundsResponse
+
     /** Los lugares del destino CON portada y categoría curada. */
     @GET("places/{id}/guide/spots")
     suspend fun guideSpots(
@@ -52,6 +63,13 @@ interface MapApi {
 
 @Serializable
 data class ApiGuideSpotsResponse(val spots: List<ApiGuideSpot> = emptyList())
+
+@Serializable
+data class ApiSpotsInBoundsResponse(
+    val spots: List<ApiGuideSpot> = emptyList(),
+    val truncated: Boolean = false,
+    val tooWide: Boolean = false,
+)
 
 @Serializable
 data class ApiGuideSpot(

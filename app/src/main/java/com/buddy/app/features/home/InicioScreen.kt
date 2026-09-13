@@ -129,6 +129,21 @@ fun InicioScreen(
         }
     }
 
+    // GPS solo con la app al frente: en background el flujo de ubicación
+    // seguía vivo en el ViewModel — calor y batería sin nadie mirando.
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_START -> viewModel.resumeTracking()
+                androidx.lifecycle.Lifecycle.Event.ON_STOP -> viewModel.pauseTracking()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     if (state.isLoading) {
         BuddyLoading(modifier)
         return
@@ -146,7 +161,7 @@ fun InicioScreen(
     ) {
         Spacer(Modifier.height(Spacing.md))
 
-        if (state.loadFailed) RetryRow(onRetry = viewModel::load)
+        if (state.loadFailed) RetryRow(onRetry = { viewModel.load(force = true) })
 
         // Confirmación pioneer — espejo del banner pioneerConfirmation (iOS)
         val pioneerNote by matchingViewModel.pioneerConfirmation.collectAsState()
@@ -448,18 +463,11 @@ private fun CategoryPicker(
         Text(
             buildAnnotatedString {
                 if (showsCarousel) {
+                    // El núcleo es la CERCANÍA; la ciudad queda como referencia.
                     withStyle(SpanStyle(color = BuddyColor.InkMuted)) {
-                        append("Lugares que recomiendan los buddies")
+                        append("Lugares cerca de ti que recomiendan los buddies")
+                        if (destinationName != null) append(" · $destinationName") else append(".")
                     }
-                    if (destinationName != null) {
-                        withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append(" de ") }
-                        withStyle(SpanStyle(color = BuddyColor.Brand, fontWeight = FontWeight.SemiBold)) {
-                            append(destinationName)
-                        }
-                    } else {
-                        withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append(" por acá") }
-                    }
-                    withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append(".") }
                 } else {
                     withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append("Elige el tema de tu consulta. Te conectaremos con una persona que conozca") }
                     if (destinationName != null) {
@@ -540,9 +548,11 @@ private fun CategoryPicker(
 private fun exploreAvailabilityText(ctx: ApiPlaceContext?, destinationName: String?): String {
     val city = destinationName ?: "este lugar"
     val n = ctx?.buddies ?: 0
-    if (n <= 0) return "Buscando buddies que conozcan $city"
-    return if (n == 1) "1 buddy conoce $city y está disponible ahora"
-    else "$n buddies conocen $city y están disponibles ahora"
+    // "Ayudan en esta zona" y no "cerca de ti": el conteo es por COBERTURA del
+    // punto; la distancia que lo respalda es a la zona del buddy, no al buddy.
+    if (n <= 0) return "Buscando buddies que ayuden en esta zona"
+    return if (n == 1) "1 buddy ayuda en esta zona"
+    else "$n buddies ayudan en esta zona"
 }
 
 @Composable

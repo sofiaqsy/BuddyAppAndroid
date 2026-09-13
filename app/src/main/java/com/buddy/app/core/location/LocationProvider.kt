@@ -59,15 +59,18 @@ class LocationProvider @Inject constructor(
      * puntuales, así que el Home no podía seguir al viajero: la ubicación se
      * leía una vez al cargar y ya.
      *
-     * Un fix cada ~2 s o cada 10 m. El filtrado de precisión NO va aquí: lo
-     * decide LocationFilter, para que otras pantallas puedan usar el fix crudo.
+     * Un fix cada ~10 s y solo si se movió 25 m. Antes era cada 2 s / 10 m en
+     * alta precisión: quieto, el ruido del GPS no dejaba descansar al chip —
+     * calor y batería. El filtrado de precisión NO va aquí: lo decide
+     * LocationFilter, para que otras pantallas puedan usar el fix crudo.
      */
     @SuppressLint("MissingPermission")
     fun updates(): Flow<LocationFix> = callbackFlow {
         if (!hasPermission()) { close(); return@callbackFlow }
         val client = LocationServices.getFusedLocationProviderClient(context)
-        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2_000L)
-            .setMinUpdateDistanceMeters(10f)
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10_000L)
+            .setMinUpdateIntervalMillis(5_000L)
+            .setMinUpdateDistanceMeters(25f)
             .build()
         var anterior: android.location.Location? = null
         val callback = object : LocationCallback() {

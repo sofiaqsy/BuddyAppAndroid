@@ -131,6 +131,10 @@ data class HelpRequestBody(
     val description: String? = null,
     @SerialName("journey_id") val journeyId: String? = null,
     @SerialName("arrival_at") val arrivalAt: String? = null,
+    /** El punto consultado (migración 018). Con él el backend busca buddies
+     *  que CUBREN ese punto; sin él, deriva la ubicación del journey o destino. */
+    val lat: Double? = null,
+    val lng: Double? = null,
 )
 
 @Serializable data class AcceptBody(@SerialName("request_id") val requestId: String)

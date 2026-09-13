@@ -42,9 +42,9 @@ class MatchingRepository @Inject constructor(
         return Json { ignoreUnknownKeys = true }.decodeFromString(texto)
     }
 
-    suspend fun createHelpRequest(destinationId: String?, category: String, description: String? = null, journeyId: String? = null): ApiHelpRequest =
+    suspend fun createHelpRequest(destinationId: String?, category: String, description: String? = null, journeyId: String? = null, lat: Double? = null, lng: Double? = null): ApiHelpRequest =
         try {
-            api.createHelpRequest(HelpRequestBody(destinationId, category, description, journeyId))
+            api.createHelpRequest(HelpRequestBody(destinationId, category, description, journeyId, lat = lat, lng = lng))
         } catch (e: retrofit2.HttpException) {
             if (e.code() == 409) {
                 val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()

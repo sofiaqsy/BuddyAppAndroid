@@ -190,6 +190,20 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    /** La app pasó a segundo plano: apagar el GPS. Nadie mira el Home y el
+     *  flujo seguía vivo en viewModelScope con la app minimizada. */
+    fun pauseTracking() {
+        if (trackingJob?.isActive == true) Log.d(TAG, "📡 [gps] tracking OFF (background)")
+        trackingJob?.cancel()
+        trackingJob = null
+    }
+
+    /** De vuelta al frente: reanudar. trackLocation ya ignora si sigue activo. */
+    fun resumeTracking() {
+        if (trackingJob?.isActive != true) Log.d(TAG, "📡 [gps] tracking ON")
+        trackLocation()
+    }
+
     fun consumeLocationChangeMessage() = _state.update { it.copy(locationChangeMessage = null) }
 
     /**
@@ -213,9 +227,25 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    fun load() {
+    private var loadJob: Job? = null
+    private var lastLoadAt = 0L
+
+    /**
+     * Una carga completa del Home a la vez. init ya llama a load(), y al
+     * arrancar con el permiso concedido onPermissionResult(true) volvía a
+     * llamarla: dos rondas enteras de trip, match, contexto, comunidad y feed.
+     * Si hay una en vuelo o terminó hace menos de 5 s se ignora; los gestos
+     * explícitos (reintentar, pull to refresh) pasan force = true.
+     */
+    fun load(force: Boolean = false) {
+        val edadMs = System.currentTimeMillis() - lastLoadAt
+        if (!force && (loadJob?.isActive == true || edadMs < 5_000)) {
+            Log.d(TAG, "load ignorado — ${if (loadJob?.isActive == true) "ya hay una carga en vuelo" else "última hace ${edadMs / 1000}s"}")
+            return
+        }
+        loadJob?.cancel()
         _state.update { it.copy(isLoading = true, loadFailed = false) }
-        viewModelScope.launch {
+        loadJob = viewModelScope.launch {
             try {
                 travelerRepo.ensureSession()
                 loadTripAndMatch()
@@ -226,6 +256,9 @@ class HomeViewModel @Inject constructor(
                 loadCommunityLive()  // Cargar comunidad viva en paralelo
                 refreshOpenRequest()
                 loadFeed()
+                lastLoadAt = System.currentTimeMillis()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "load failed", e)
                 _state.update { it.copy(isLoading = false, loadFailed = true) }
@@ -363,7 +396,13 @@ class HomeViewModel @Inject constructor(
         }
 
         if (gpsDestId != null) {
-            val ctx = runCatching { api.placeContext(gpsDestId, source = "destination") }.getOrNull()
+            // Con el GPS: buddies que CUBREN este punto (migración 018), no solo
+            // los que tienen el destino en su lista.
+            val s = _state.value
+            val ctx = runCatching {
+                api.placeContext(gpsDestId, source = "destination",
+                    lat = s.stableLat ?: s.userLat, lng = s.stableLng ?: s.userLng)
+            }.getOrNull()
                 ?: ApiPlaceContext(0, 0, 0, "pioneer")
             Log.d(TAG, "resolved $gpsDestName → buddies=${ctx.buddies}")
             _state.update {

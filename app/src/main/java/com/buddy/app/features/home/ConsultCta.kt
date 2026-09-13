@@ -142,7 +142,7 @@ fun ConsultCta(
                         withStyle(SpanStyle(color = BuddyColor.Ink, fontWeight = FontWeight.SemiBold)) {
                             append(
                                 if (buscando) "Buscando buddy…"
-                                else "Consultar en ${destinationName ?: "este lugar"}"
+                                else "Consultar a buddies"
                             )
                         }
                     }

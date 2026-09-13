@@ -31,6 +31,9 @@ interface HomeApi {
     suspend fun placeContext(
         @Path("id") id: String,
         @Query("source") source: String,   // "place" | "destination"
+        /** Con el punto del viajero el conteo es por cobertura, no por destino. */
+        @Query("lat") lat: Double? = null,
+        @Query("lng") lng: Double? = null,
     ): ApiPlaceContext
 
     /** OJO: responde envuelto en { items: [...] }, no un array plano. */

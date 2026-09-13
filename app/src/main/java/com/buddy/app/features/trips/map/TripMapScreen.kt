@@ -80,6 +80,16 @@ class TripMapViewModel @Inject constructor(
     suspend fun spots(destinationId: String): List<ApiGuideSpot> =
         runCatching { mapApi.guideSpots(destinationId).spots }.getOrDefault(emptyList())
 
+    /** null si falló o si el mapa está demasiado alejado: quien llama conserva
+     *  los pins que ya tenía en vez de vaciar el mapa. */
+    suspend fun spotsInBounds(minLat: Double, minLng: Double, maxLat: Double, maxLng: Double): List<ApiGuideSpot>? =
+        runCatching { mapApi.spotsInBounds(minLat, minLng, maxLat, maxLng) }
+            .onFailure { android.util.Log.w("TripMap", "spotsInBounds falló", it) }
+            .getOrNull()
+            ?.takeUnless { it.tooWide }
+            ?.spots
+            ?.also { r -> android.util.Log.d("TripMap", "en pantalla: ${r.size} lugar(es) — ${r.take(5).joinToString { it.name }}") }
+
     suspend fun buddyCount(destinationId: String): Int? =
         runCatching { homeApi.placeContext(destinationId, "destination").buddies }.getOrNull()
 
@@ -144,8 +154,16 @@ fun TripMapScreen(
     val destLat = journey.destination?.lat ?: coordsPedidas?.first
     val destLng = journey.destination?.lng ?: coordsPedidas?.second
 
-    val spots by produceState(emptyList<ApiGuideSpot>(), destId) {
+    val spotsDestino by produceState(emptyList<ApiGuideSpot>(), destId) {
         value = if (destId != null) withContext(Dispatchers.IO) { viewModel.spots(destId) } else emptyList()
+    }
+    // Los que caen en la parte VISIBLE del mapa, de cualquier destino. Los spots
+    // cuelgan de UN destino, así que el mapa de Breña salía vacío aunque
+    // Cafetería Rosal y El encanto están ahí (pertenecen a "Lima").
+    var spotsEnPantalla by remember { mutableStateOf(emptyList<ApiGuideSpot>()) }
+    val spots = remember(spotsDestino, spotsEnPantalla) {
+        val ids = spotsDestino.mapTo(HashSet()) { it.id }
+        spotsDestino + spotsEnPantalla.filter { it.id !in ids }
     }
     val buddyCount by produceState<Int?>(null, destId) {
         value = if (destId != null) withContext(Dispatchers.IO) { viewModel.buddyCount(destId) } else null
@@ -270,6 +288,53 @@ fun TripMapScreen(
                         controller.setZoom(if (spots.isEmpty()) 15.0 else ZoomDestino)
                         controller.setCenter(center)
                         mapRef = this
+                        // Al terminar de mover o hacer zoom (400 ms sin gestos):
+                        // pedir lo que hay en pantalla. Cancela la petición
+                        // anterior para que solo la última posición cuente.
+                        var boundsJob: kotlinx.coroutines.Job? = null
+                        // Rectángulo ya pedido (el doble de lo visible). Zoom o
+                        // arrastre dentro de él no vuelve a la red: antes cada
+                        // gesto pedía otra vez el mismo sitio.
+                        var pedido: DoubleArray? = null
+                        val pedirEnPantalla = {
+                            val bb = boundingBox
+                            val ya = pedido
+                            val dentro = ya != null &&
+                                bb.latSouth >= ya[0] && bb.lonWest >= ya[1] &&
+                                bb.latNorth <= ya[2] && bb.lonEast <= ya[3]
+                            if (!dentro) {
+                                boundsJob?.cancel()
+                                boundsJob = scope.launch {
+                                    val hLat = (bb.latNorth - bb.latSouth)
+                                    val hLng = (bb.lonEast - bb.lonWest)
+                                    val area = doubleArrayOf(
+                                        bb.latSouth - hLat / 2, bb.lonWest - hLng / 2,
+                                        bb.latNorth + hLat / 2, bb.lonEast + hLng / 2,
+                                    )
+                                    val r = withContext(Dispatchers.IO) {
+                                        viewModel.spotsInBounds(area[0], area[1], area[2], area[3])
+                                    }
+                                    if (r != null) {
+                                        // Con 150 o más pudo venir recortado: no se reutiliza.
+                                        pedido = if (r.size < 150) area else null
+                                        // Solo si cambió algo: reasignar la misma lista
+                                        // redibujaba todos los marcadores.
+                                        if (r.map { it.id } != spotsEnPantalla.map { it.id }) spotsEnPantalla = r
+                                    }
+                                }
+                            }
+                        }
+                        addMapListener(
+                            org.osmdroid.events.DelayedMapListener(
+                                object : org.osmdroid.events.MapListener {
+                                    override fun onScroll(event: org.osmdroid.events.ScrollEvent?): Boolean { pedirEnPantalla(); return false }
+                                    override fun onZoom(event: org.osmdroid.events.ZoomEvent?): Boolean { pedirEnPantalla(); return false }
+                                },
+                                600,
+                            ),
+                        )
+                        // Primera carga: el rectángulo solo existe tras el layout.
+                        addOnFirstLayoutListener { _, _, _, _, _ -> pedirEnPantalla() }
                     }
                 },
                 update = { map ->
