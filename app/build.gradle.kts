@@ -29,8 +29,8 @@ android {
         // (comunidad viva, perfiles, mapa con ficha de lugar, compartir). Que el
         // número diga lo mismo en los dos lados es lo que permite responder "¿en
         // qué versión estás?" sin traducir. Android nunca publicó una 1.0.3.
-        versionCode = 4
-        versionName = "1.0.4"
+        versionCode = 5
+        versionName = "1.1.0"
 
         buildConfigField("String", "API_BASE_URL", "\"https://buddy-core-504b393f8333.herokuapp.com/v1/\"")
         // Dominio público de los enlaces que se comparten fuera de la app. NO es

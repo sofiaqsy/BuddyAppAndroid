@@ -8,6 +8,11 @@ import com.buddy.app.core.data.model.ApiPlaceCard
 import com.buddy.app.core.data.model.ApiPlaceContext
 import com.buddy.app.core.data.model.ApiPulseItem
 import com.buddy.app.core.location.LocationProvider
+import com.buddy.app.core.location.DistanceResolver
+import com.buddy.app.core.location.LocationFilter
+import com.buddy.app.core.location.UserLocation
+import com.buddy.app.features.home.data.SpotsRepository
+import kotlinx.coroutines.Job
 import com.buddy.app.features.authentication.data.TravelerRepository
 import com.buddy.app.features.home.data.HomeApi
 import com.buddy.app.features.home.data.ResolveRequest
@@ -22,11 +27,9 @@ import java.time.Instant
 import javax.inject.Inject
 
 /**
- * Contexto explícito elegido por el viajero para el composer de Home: desde
- * dónde se construye el próximo Help Request. Nunca se decide solo — el
- * usuario elige, Home nunca cambia de contexto en silencio. Espejo de
- * HomeContext (iOS). Trip lleva el journey.id — con más de un trip vivo
- * (ej: San Francisco + Villa Rica) cada uno es una opción propia.
+ * Desde dónde se construye el próximo Help Request en el composer de Home.
+ * Lo decide el GPS (ver effectiveHomeContext); Trip solo queda como reserva
+ * para cuando no hay ubicación resuelta. Espejo de HomeContext (iOS).
  */
 sealed interface HomeContext {
     data object CurrentLocation : HomeContext
@@ -49,6 +52,7 @@ class HomeViewModel @Inject constructor(
     private val locationProvider: LocationProvider,
     private val sessionStore: com.buddy.app.core.data.SessionStore,
     private val sse: com.buddy.app.core.network.SseClient,
+    private val spotsRepo: SpotsRepository,
 ) : ViewModel() {
 
     data class HomeState(
@@ -89,64 +93,34 @@ class HomeViewModel @Inject constructor(
         // MARK: – Comunidad viva
         val communityPulse: List<ApiPulseItem> = emptyList(), // pulso global (fallback)
         val isLoadingCommunity: Boolean = false,
-        // MARK: – Selector de contexto Home (Ubicación actual vs Mi viaje)
-        /** Destino GPS resuelto, calculado SIEMPRE en paralelo al trip (igual que
-         * iOS) — independiente de destinationId/destinationName, que reflejan el
-         * contexto EFECTIVO (el elegido), no necesariamente el GPS. */
+        /** Destino que resolvió el backend para el GPS. */
         val gpsDestinationId: String? = null,
         val gpsDestinationName: String? = null,
-        /** Selección manual del usuario. null = sin override, se aplican las
-         * reglas de default (ver effectiveHomeContext). */
-        val homeContextOverride: HomeContext? = null,
+        /** Última ubicación que pasó LocationFilter — las distancias de las cards
+         *  usan esta; userLat/userLng siguen siendo el último fix para el resto. */
+        val stableLat: Double? = null,
+        val stableLng: Double? = null,
+        /** Lugar más cercano con margen: solo esa card puede decir "Estás aquí". */
+        val nearestSpotId: String? = null,
+        /** "Ahora en X" cuando el destino resuelto CAMBIA. */
+        val locationChangeMessage: String? = null,
     ) {
         val hasCurrentLocationContext: Boolean get() = gpsDestinationId != null
-        val hasTripContext: Boolean get() = liveJourneys.isNotEmpty()
-        /** El trip vivo (si alguno) cuyo destino coincide EXACTO con el GPS (ej:
-         * trip a San Francisco y ya estás en San Francisco). Con más de un trip
-         * vivo, "Ubicación actual" y ese trip serían la MISMA fila repetida —
-         * se fusionan: no se ofrece "Ubicación actual" por separado, ese trip
-         * cubre ambas cosas. Los demás trips (ej: Villa Rica) siguen siendo
-         * opciones propias. */
-        val matchingTripForGPS: ApiJourney?
-            get() {
-                val gpsId = gpsDestinationId ?: return null
-                return liveJourneys.firstOrNull { (it.destination?.id ?: it.destinationId) == gpsId }
-            }
-        /** "Ubicación actual" solo se ofrece como fila propia cuando NO coincide
-         * con ninguno de los trips vivos — si coincide, queda fusionada en ese trip. */
-        val shouldOfferCurrentLocationOption: Boolean
-            get() = hasCurrentLocationContext && matchingTripForGPS == null
-        /** Total de opciones distintas que el selector podría ofrecer. */
-        val homeContextOptionCount: Int get() = (if (shouldOfferCurrentLocationOption) 1 else 0) + liveJourneys.size
 
         /**
-         * Contexto efectivo del composer. Respeta la selección manual mientras
-         * siga siendo válida (el trip elegido sigue vivo, o el GPS ya no
-         * coincide con un trip si eligió "Ubicación actual"); si dejó de serlo,
-         * recalcula el default — nunca queda "atascado" en un contexto que ya
-         * no existe. Reglas:
-         *   GPS coincide con un trip vivo → ese trip (fusionado, ver matchingTripForGPS)
-         *   GPS + trip(s), sin coincidir  → Ubicación actual (el usuario puede cambiar)
-         *   sin GPS + trip(s)             → el primer trip vivo
-         *   GPS + sin trip                → Ubicación actual (única opción)
-         *   sin GPS + sin trip            → null (flujo de permisos existente)
+         * El GPS MANDA. Antes había un selector para elegir entre "Ubicación
+         * actual" y cada trip vivo; se quitó igual que en iOS: con el GPS
+         * resolviendo bien aparecía en cuanto había un trip en otra ciudad,
+         * una decisión que el viajero no había pedido tomar.
+         *   GPS resuelto        → CurrentLocation
+         *   sin GPS + trip(s)   → el primer trip vivo
+         *   sin GPS + sin trip  → null (flujo de permisos existente)
          */
         val effectiveHomeContext: HomeContext?
-            get() {
-                val manualStillValid = when (val override = homeContextOverride) {
-                    is HomeContext.CurrentLocation -> shouldOfferCurrentLocationOption
-                    is HomeContext.Trip -> liveJourneys.any { it.id == override.journeyId }
-                    null -> false
-                }
-                if (manualStillValid) return homeContextOverride
-
-                matchingTripForGPS?.let { return HomeContext.Trip(it.id) }
-                return when {
-                    hasCurrentLocationContext && hasTripContext -> HomeContext.CurrentLocation
-                    liveJourneys.isNotEmpty() -> HomeContext.Trip(liveJourneys.first().id)
-                    hasCurrentLocationContext -> HomeContext.CurrentLocation
-                    else -> null
-                }
+            get() = when {
+                hasCurrentLocationContext -> HomeContext.CurrentLocation
+                liveJourneys.isNotEmpty() -> HomeContext.Trip(liveJourneys.first().id)
+                else -> null
             }
 
         /** El journey correspondiente al contexto efectivo, si es de tipo Trip. */
@@ -161,9 +135,62 @@ class HomeViewModel @Inject constructor(
     val state: StateFlow<HomeState> = _state.asStateFlow()
 
     init {
+        observeSpots()
         load()
         observeRealtime()
+        trackLocation()
     }
+
+    /** La lista, el más cercano y la carga viven en SpotsRepository. */
+    private fun observeSpots() {
+        viewModelScope.launch { spotsRepo.spots.collect { cards -> _state.update { it.copy(exploreCards = cards) } } }
+        viewModelScope.launch { spotsRepo.nearestId.collect { id -> _state.update { it.copy(nearestSpotId = id) } } }
+        viewModelScope.launch {
+            spotsRepo.isLoading.collect { cargando ->
+                // Esqueleto solo si no hay nada que mostrar: con cache la lista
+                // se ve al instante y se refresca detrás.
+                _state.update { it.copy(isLoadingExplore = cargando && it.exploreCards.isEmpty()) }
+            }
+        }
+    }
+
+    private var trackingJob: Job? = null
+    private var lastQueryLat: Double? = null
+    private var lastQueryLng: Double? = null
+
+    /**
+     * Sigue al viajero. Cada fix aceptado reordena los spots en memoria (sin
+     * red); la red solo va cada 150 m. Espejo del onChange del GPS en InicioView.
+     */
+    private fun trackLocation() {
+        if (trackingJob?.isActive == true || !locationProvider.hasPermission()) return
+        trackingJob = viewModelScope.launch {
+            var hasStable = false
+            locationProvider.updates().collect { fix ->
+                if (!LocationFilter.accept(fix.accuracy, hasStable)) {
+                    Log.d(TAG, "📡 [gps] descartado ±${fix.accuracy?.toInt()}m (umbral ${LocationFilter.MAX_ACCURACY_M.toInt()}m)")
+                    return@collect
+                }
+                hasStable = true
+                _state.update { it.copy(stableLat = fix.lat, stableLng = fix.lng, userLat = fix.lat, userLng = fix.lng) }
+                spotsRepo.reorder(fix.lat, fix.lng)
+
+                val prevLat = lastQueryLat
+                val prevLng = lastQueryLng
+                val movido = if (prevLat != null && prevLng != null)
+                    DistanceResolver.meters(prevLat, prevLng, fix.lat, fix.lng) else null
+                if (movido == null || movido > LOCATION_REFRESH_METERS) {
+                    Log.d(TAG, "🏠 [gps] ${movido?.let { "${it.toInt()}m" } ?: "primer fix"} desde la última consulta → refresco ubicación + spots")
+                    lastQueryLat = fix.lat
+                    lastQueryLng = fix.lng
+                    launch { runCatching { refreshCommunityContext(UserLocation(fix.lat, fix.lng)) } }
+                    launch { spotsRepo.refresh(fix.lat, fix.lng, "gps") }
+                }
+            }
+        }
+    }
+
+    fun consumeLocationChangeMessage() = _state.update { it.copy(locationChangeMessage = null) }
 
     /**
      * Tiempo real del Home — espejo de travelerMatchSignature (iOS): el stream
@@ -192,6 +219,9 @@ class HomeViewModel @Inject constructor(
             try {
                 travelerRepo.ensureSession()
                 loadTripAndMatch()
+                // Con permiso los spots los pide el primer fix, con coordenadas.
+                // Pedirlos aquí también era la petición duplicada del arranque.
+                if (!locationProvider.hasPermission()) launch { spotsRepo.refresh(null, null, "load") }
                 refreshCommunityContext()
                 loadCommunityLive()  // Cargar comunidad viva en paralelo
                 refreshOpenRequest()
@@ -217,52 +247,6 @@ class HomeViewModel @Inject constructor(
     }
 
     /**
-     * Los lugares del carrusel "Explora {ciudad}".
-     *
-     * Se piden por GPS y no por el destino elegido: son lugares de POR AQUÍ.
-     * Sin coordenadas el backend responde igual —los más recientes—, así que no
-     * se bloquea esperando permiso de ubicación.
-     */
-    /**
-     * Los lugares recomendados del destino en el que se está AHORA.
-     *
-     * Se limpian antes de pedir: mientras llega la respuesta no puede quedarse
-     * en pantalla lo del sitio anterior. Al llegar a Miraflores el título decía
-     * Miraflores y las fotos seguían siendo de Lima.
-     *
-     * Sin relleno con destinos vecinos: si aquí no hay nada recomendado, la
-     * sección va vacía. Rellenar esconde justo dónde falta contenido.
-     */
-    private suspend fun loadExploreCards(destinationId: String?) {
-        if (cardsDelDestino == destinationId) return
-        cardsDelDestino = destinationId
-        _state.update { it.copy(exploreCards = emptyList(), isLoadingExplore = destinationId != null) }
-        if (destinationId == null) return
-
-        runCatching { api.placeShares(limit = 12, destinationId = destinationId).items }
-            .onSuccess { cards ->
-                // El destino pudo cambiar mientras volvía: sin esto, la
-                // respuesta lenta de un sitio del que ya te fuiste pisaría la
-                // del sitio donde estás.
-                if (cardsDelDestino != destinationId) {
-                    Log.d(TAG, "placeShares de ${destinationId.take(8)} descartado — el destino cambió")
-                    return@onSuccess
-                }
-                Log.d(TAG, "placeShares ${destinationId.take(8)} → ${cards.size}: ${cards.joinToString { c -> c.name }}")
-                _state.update { it.copy(exploreCards = cards, isLoadingExplore = false) }
-            }
-            .onFailure {
-                Log.e(TAG, "placeShares failed", it)
-                // Un fallo no es "no hay lugares", pero tampoco puede dejar en
-                // pantalla los del destino anterior: ya se vaciaron arriba.
-                _state.update { st -> st.copy(isLoadingExplore = false) }
-            }
-    }
-
-    /** De qué destino son las cards que hay ahora en pantalla. */
-    private var cardsDelDestino: String? = null
-
-    /**
      * Mi solicitud abierta, si la hay. Alimenta el estado "Buscando buddy…" del
      * CTA — sin esto el Home invita a empezar una búsqueda que ya está viva.
      */
@@ -280,21 +264,8 @@ class HomeViewModel @Inject constructor(
     }
 
     fun onPermissionResult(granted: Boolean) {
-        if (granted) load()
+        if (granted) { load(); trackLocation() }
         else _state.update { it.copy(isLoading = false, needsLocationPermission = true) }
-    }
-
-    /** Selección manual del selector de contexto — nunca automática. */
-    fun setHomeContext(context: HomeContext) {
-        _state.update { it.copy(homeContextOverride = context) }
-        // refreshCommunityContext PRIMERO: loadCommunityLive depende de
-        // effectiveHomeContext, que a su vez depende del destinationId que
-        // recién escribe refreshCommunityContext — sin este orden, Comunidad
-        // Viva quedaba mostrando el contexto anterior hasta el próximo ciclo.
-        viewModelScope.launch {
-            refreshCommunityContext()
-            loadCommunityLive()
-        }
     }
 
     /** Espejo de loadData + activeMatch (iOS). */
@@ -351,77 +322,74 @@ class HomeViewModel @Inject constructor(
     }
 
     /**
-     * GPS se resuelve SIEMPRE en paralelo al trip (igual que iOS) — quién
-     * "gana" (destinationId/destinationName/communityContext) lo decide el
-     * contexto EFECTIVO (elegido por el usuario o el default de las 4 reglas),
-     * nunca la sola presencia de un trip.
+     * Resuelve el GPS y DESPUÉS decide: si hay destino resuelto manda el GPS;
+     * el trip solo es reserva sin ubicación. [known] evita otra lectura
+     * puntual cuando ya viene de trackLocation.
+     *
+     * Un fallo de red al resolver NO borra la ubicación anterior: borrarla
+     * mandaba el Home a modo pioneer por un túnel.
      */
-    private suspend fun refreshCommunityContext() {
+    private suspend fun refreshCommunityContext(known: UserLocation? = null) {
+        val prevId = _state.value.gpsDestinationId
+        val prevName = _state.value.gpsDestinationName
         var gpsDestId: String? = null
         var gpsDestName: String? = null
         if (locationProvider.hasPermission()) {
-            val loc = locationProvider.currentLocation()
+            val loc = known ?: locationProvider.currentLocation()
             if (loc != null) {
                 _state.update { it.copy(userLat = loc.lat, userLng = loc.lng) }
                 Log.d(TAG, "resolving location lat=${loc.lat} lng=${loc.lng}")
-                val res = api.resolveLocation(ResolveRequest(loc.lat, loc.lng))
-                val resolution = if (res.code() == 204) null else res.body()
-                if (resolution != null) {
-                    gpsDestId = resolution.destinationId
-                    gpsDestName = resolution.destinationName
+                val res = runCatching { api.resolveLocation(ResolveRequest(loc.lat, loc.lng)) }.getOrNull()
+                if (res == null) {
+                    Log.w(TAG, "resolveLocation falló por red — conservo ${prevName ?: "nil"}")
+                    gpsDestId = prevId
+                    gpsDestName = prevName
+                } else {
+                    val resolution = if (res.code() == 204) null else res.body()
+                    gpsDestId = resolution?.destinationId
+                    gpsDestName = resolution?.destinationName
                 }
             }
         }
-        _state.update { it.copy(gpsDestinationId = gpsDestId, gpsDestinationName = gpsDestName) }
+        // Aviso solo en el CAMBIO, no en la primera resolución.
+        val aviso = if (prevId != null && gpsDestId != null && prevId != gpsDestId) "Ahora en $gpsDestName" else null
+        if (aviso != null) Log.d(TAG, "🏠 [location] $prevName → $gpsDestName")
+        _state.update {
+            it.copy(
+                gpsDestinationId = gpsDestId,
+                gpsDestinationName = gpsDestName,
+                locationChangeMessage = aviso ?: it.locationChangeMessage,
+            )
+        }
 
-        // El trip elegido en el selector — no necesariamente activeJourney,
-        // con 2+ trips vivos puede ser cualquiera.
-        val journey = _state.value.effectiveTripJourney
+        if (gpsDestId != null) {
+            val ctx = runCatching { api.placeContext(gpsDestId, source = "destination") }.getOrNull()
+                ?: ApiPlaceContext(0, 0, 0, "pioneer")
+            Log.d(TAG, "resolved $gpsDestName → buddies=${ctx.buddies}")
+            _state.update {
+                it.copy(isLoading = false, destinationId = gpsDestId, destinationName = gpsDestName, communityContext = ctx)
+            }
+            return
+        }
+
+        val journey = _state.value.liveJourneys.firstOrNull()
         if (journey != null) {
             val destId = journey.destination?.id ?: journey.destinationId
             val ctx = destId?.let { runCatching { api.placeContext(it, "destination") }.getOrNull() }
                 ?: ApiPlaceContext(0, 0, 0, "pioneer")
             _state.update {
-                it.copy(
-                    isLoading = false,
-                    destinationId = destId,
-                    destinationName = journey.destination?.name,
-                    communityContext = ctx,
-                )
+                it.copy(isLoading = false, destinationId = destId, destinationName = journey.destination?.name, communityContext = ctx)
             }
-            loadExploreCards(destId)
             return
         }
 
-        if (gpsDestId == null) {
-            if (!locationProvider.hasPermission()) {
-                _state.update { it.copy(isLoading = false, needsLocationPermission = true) }
-            } else {
-                // Sin match → pioneer mode (0 buddies), igual que iOS
-                _state.update {
-                    it.copy(
-                        isLoading = false,
-                        destinationId = null,
-                        destinationName = null,
-                        communityContext = ApiPlaceContext(0, 0, 0, "pioneer"),
-                    )
-                }
+        if (!locationProvider.hasPermission()) {
+            _state.update { it.copy(isLoading = false, needsLocationPermission = true) }
+        } else {
+            _state.update {
+                it.copy(isLoading = false, destinationId = null, destinationName = null, communityContext = ApiPlaceContext(0, 0, 0, "pioneer"))
             }
-            // Sin destino no hay nada que recomendar "aquí".
-            loadExploreCards(null)
-            return
         }
-        val ctx = api.placeContext(gpsDestId, source = "destination")
-        Log.d(TAG, "resolved $gpsDestName → buddies=${ctx.buddies}")
-        _state.update {
-            it.copy(
-                isLoading = false,
-                destinationId = gpsDestId,
-                destinationName = gpsDestName,
-                communityContext = ctx,
-            )
-        }
-        loadExploreCards(gpsDestId)
     }
 
     fun loadFeed() {
@@ -518,5 +486,9 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    companion object { private const val TAG = "HomeVM" }
+    companion object {
+        private const val TAG = "HomeVM"
+        /** Cuánto hay que moverse para volver a preguntar ubicación y spots. */
+        private const val LOCATION_REFRESH_METERS = 150.0
+    }
 }

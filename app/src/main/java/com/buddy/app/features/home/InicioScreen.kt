@@ -166,6 +166,26 @@ fun InicioScreen(
             Spacer(Modifier.height(Spacing.sm))
         }
 
+        // "Ahora en X" cuando el destino resuelto cambia: sin aviso el contenido
+        // se reemplaza solo y se lee como un fallo, no como el Home siguiéndote.
+        state.locationChangeMessage?.let { aviso ->
+            LaunchedEffect(aviso) {
+                kotlinx.coroutines.delay(2500)
+                viewModel.consumeLocationChangeMessage()
+            }
+            Text(
+                aviso,
+                style = BuddyType.Footnote,
+                color = BuddyColor.InkInverse,
+                modifier = Modifier
+                    .padding(horizontal = Spacing.edge)
+                    .clip(RoundedCornerShape(Radius.md))
+                    .background(BuddyColor.Brand)
+                    .padding(horizontal = Spacing.md, vertical = Spacing.sm),
+            )
+            Spacer(Modifier.height(Spacing.sm))
+        }
+
         // ── Composer (con o sin trip — mismo layout, distinto destino) ─────
         // Box: el loader flota centrado sobre el composer dimmeado mientras la
         // intención se procesa (pioneer: trip + solicitud) — paridad con iOS.
@@ -183,21 +203,10 @@ fun InicioScreen(
             // Spacer(Spacing.md) de arriba de la pantalla se sumaba a ese
             // incluso sin nada que separar (Case 3), dejando un espacio doble
             // e injustificado encima de "Consulta con un buddy".
-            val hasHeaderRow = (effectiveContext != null && state.homeContextOptionCount > 1) || effectiveContext == null
-            if (effectiveContext != null && state.homeContextOptionCount > 1) {
-                // 2+ opciones distintas (Ubicación actual + uno o más trips):
-                // selector interactivo. "Ubicación actual" se omite si coincide
-                // con alguno de los trips (matchingTripForGPS) — esa fila ya
-                // cubre ambas cosas, no se repite.
-                HomeContextSelector(
-                    context = effectiveContext,
-                    hasCurrentLocation = state.shouldOfferCurrentLocationOption,
-                    currentLocationCity = state.gpsDestinationName,
-                    trips = state.liveJourneys.map { HomeContextTripOption(it.id, it.destination?.name ?: "Mi viaje") },
-                    onSelect = viewModel::setHomeContext,
-                )
-                Spacer(Modifier.height(Spacing.xs))
-            } else if (effectiveContext == null) {
+            // La única cabecera posible es LocationContext (sin GPS ni trip): el
+            // selector de contexto se quitó, manda el GPS.
+            val hasHeaderRow = effectiveContext == null
+            if (effectiveContext == null) {
                 // Case 4: ni GPS ni trip — flujo de permisos/registro existente.
                 LocationContext(
                     city = state.destinationName,
@@ -225,6 +234,9 @@ fun InicioScreen(
                 activeBuddyHasUnread = selectedIsActiveTrip && state.unreadMessageCount > 0,
                 exploreCards = state.exploreCards,
                 isLoadingExplore = state.isLoadingExplore,
+                userLat = state.stableLat,
+                userLng = state.stableLng,
+                nearestSpotId = state.nearestSpotId,
                 searchingCategoryKey = state.openRequestCategory,
                 isLoading = isFindingBuddy,
                 topSpacing = hasHeaderRow,
@@ -347,94 +359,6 @@ private fun LocationContext(city: String?, onRequestPermission: () -> Unit) {
     }
 }
 
-/** Una fila seleccionable del dropdown: un trip vivo (journey.id + nombre a mostrar). */
-private data class HomeContextTripOption(val id: String, val name: String)
-
-// ── Home context selector — "Ubicación actual" vs Mi(s) viaje(s) ──────────
-// Interactivo solo cuando hay 2+ opciones distintas (Ubicación actual + uno o
-// más trips) — con una sola opción se muestra como fila fija, sin affordance
-// de tap. Con 2+ trips vivos, cada uno aparece como su propia fila: no hay un
-// solo "Mi viaje" genérico si el viajero tiene más de un trip. Espejo de
-// HomeContextSelector (iOS).
-@Composable
-private fun HomeContextSelector(
-    context: HomeContext,
-    hasCurrentLocation: Boolean,
-    currentLocationCity: String?,
-    trips: List<HomeContextTripOption>,
-    onSelect: (HomeContext) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val interactive = (if (hasCurrentLocation) 1 else 0) + trips.size > 1
-    val icon = if (context is HomeContext.CurrentLocation) Icons.Filled.LocationOn else Icons.Filled.Map
-    val label = when (context) {
-        is HomeContext.CurrentLocation -> currentLocationCity.takeUnless { it.isNullOrEmpty() } ?: "Ubicación actual"
-        is HomeContext.Trip -> trips.firstOrNull { it.id == context.journeyId }?.name ?: "Mi trip"
-    }
-
-    Box {
-        Row(
-            modifier = if (interactive) Modifier.clickable { expanded = true } else Modifier,
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Icon(icon, contentDescription = null, Modifier.size(12.dp), tint = BuddyColor.Brand)
-            Text(
-                label,
-                style = BuddyType.Caption1.copy(fontWeight = FontWeight.SemiBold),
-                color = BuddyColor.Brand,
-                maxLines = 1,
-                softWrap = false,
-            )
-            if (interactive) {
-                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = null, Modifier.size(14.dp), tint = BuddyColor.InkMuted)
-            }
-        }
-        if (interactive) {
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                if (hasCurrentLocation) {
-                    DropdownMenuItem(
-                        text = {
-                            HomeContextOptionRow(
-                                title = currentLocationCity.takeUnless { it.isNullOrEmpty() } ?: "Ubicación actual",
-                                subtitle = "Ubicación actual",
-                                checked = context is HomeContext.CurrentLocation,
-                            )
-                        },
-                        onClick = { onSelect(HomeContext.CurrentLocation); expanded = false },
-                    )
-                }
-                trips.forEachIndexed { index, trip ->
-                    if (hasCurrentLocation || index > 0) HorizontalDivider()
-                    DropdownMenuItem(
-                        text = {
-                            HomeContextOptionRow(
-                                title = trip.name,
-                                subtitle = "Mi trip",
-                                checked = context is HomeContext.Trip && context.journeyId == trip.id,
-                            )
-                        },
-                        onClick = { onSelect(HomeContext.Trip(trip.id)); expanded = false },
-                    )
-                }
-            }
-        }
-    }
-}
-
-/** El nombre real del lugar (trip o ubicación) va como texto principal —
- * "Mi viaje"/"Ubicación actual" queda de subtítulo, no al revés. */
-@Composable
-private fun HomeContextOptionRow(title: String, subtitle: String, checked: Boolean) {
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (checked) Icon(Icons.Filled.Check, contentDescription = null, Modifier.size(14.dp), tint = BuddyColor.Brand)
-            Text(title, style = BuddyType.Body)
-        }
-        Text(subtitle, style = BuddyType.Caption1, color = BuddyColor.InkMuted)
-    }
-}
-
 // ── CategoryPicker — espejo completo de CategoryPickerView (iOS) ──────────
 
 private data class BuddyCategory(val icon: ImageVector, val label: String, val subtitle: String, val apiKey: String)
@@ -484,6 +408,9 @@ private fun CategoryPicker(
     activeBuddyHasUnread: Boolean,
     exploreCards: List<ApiPlaceCard>,
     isLoadingExplore: Boolean,
+    userLat: Double?,
+    userLng: Double?,
+    nearestSpotId: String?,
     searchingCategoryKey: String?,
     isLoading: Boolean,
     /** false cuando ya hay algo pintado arriba (selector/LocationContext) —
@@ -578,6 +505,9 @@ private fun CategoryPicker(
             ExploreCarousel(
                 cards = exploreCards,
                 isSkeleton = exploreCards.isEmpty() && isLoadingExplore,
+                userLat = userLat,
+                userLng = userLng,
+                nearestId = nearestSpotId,
                 onOpenPlace = onOpenPlace,
                 modifier = Modifier.sangraLateral(Spacing.edge),
             )

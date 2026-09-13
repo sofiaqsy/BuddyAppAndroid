@@ -36,7 +36,8 @@ class AuthInterceptor @Inject constructor(
             path.contains("/travelers/refresh") || path.contains("/auth/")
         if (response.code == 401 && !isAuthPath) {
             val fresh = runBlocking {
-                runCatching { travelerRepo.get().refreshNow() }.getOrNull()
+                // El token que falló: si otra petición ya lo renovó, no se repite.
+                runCatching { travelerRepo.get().refreshNow(failedToken = token) }.getOrNull()
             }
             if (!fresh.isNullOrEmpty()) {
                 response.close()

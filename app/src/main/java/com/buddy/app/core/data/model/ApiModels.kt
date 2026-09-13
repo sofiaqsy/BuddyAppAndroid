@@ -198,6 +198,9 @@ data class ApiPlaceCard(
     @SerialName("destination_name") val destinationName: String? = null,
     val lat: Double? = null,
     val lng: Double? = null,
+    /** Distancia que calculó place_cards_by_distance al pedir la lista — la
+     *  misma que decidió el orden. Nulo en las vías que no ordenan por cercanía. */
+    @SerialName("distance_meters") val distanceMeters: Int? = null,
     @SerialName("cover_url") val coverUrl: String? = null,
     @SerialName("cover_urls") val coverUrls: List<String>? = null,
     /** Las mismas fotos que [coverUrls] pero cada una CON SU AUTOR.

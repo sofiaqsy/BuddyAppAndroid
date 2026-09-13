@@ -1,5 +1,20 @@
 package com.buddy.app.features.home
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.TransformOrigin
+import com.buddy.app.core.location.DistanceResolver
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -105,6 +120,11 @@ fun ExploreCarousel(
      *  los datos. Con esto además se desactiva el scroll — arrastrar un
      *  esqueleto sugiere que hay contenido que explorar y no lo hay. */
     isSkeleton: Boolean = false,
+    /** Última ubicación filtrada (LocationFilter). Nula sin GPS. */
+    userLat: Double? = null,
+    userLng: Double? = null,
+    /** Id del lugar más cercano con margen: solo esa card dice "Estás aquí". */
+    nearestId: String? = null,
 ) {
     val fuente = remember(cards, isSkeleton) {
         if (isSkeleton && cards.isEmpty()) ApiPlaceCard.placeholders() else cards
@@ -224,6 +244,9 @@ fun ExploreCarousel(
                 ExploreCarouselCard(
                     photo = photo,
                     isSkeleton = isSkeleton,
+                    userLat = userLat,
+                    userLng = userLng,
+                    isNearest = photo.place.id == nearestId,
                     modifier = Modifier
                         .width(CardWidth)
                         .height(CardHeight)
@@ -328,9 +351,43 @@ private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexed(
 private fun ExploreCarouselCard(
     photo: ExplorePhoto,
     isSkeleton: Boolean,
+    userLat: Double?,
+    userLng: Double?,
+    isNearest: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val place = photo.place
+
+    // Distancia MOSTRADA y "Estás aquí" con histéresis. La lógica vive en
+    // DistanceResolver; la card solo guarda lo que está mostrando, así el ruido
+    // del GPS no hace saltar el número. Espejo de recompute() (iOS).
+    var shownDistance by remember(place.id) { mutableStateOf<Double?>(null) }
+    var isHere by remember(place.id) { mutableStateOf(false) }
+    LaunchedEffect(place.id, userLat, userLng, isNearest) {
+        val nueva = DistanceResolver.distance(userLat, userLng, place) ?: place.distanceMeters?.toDouble()
+        if (nueva != null && DistanceResolver.shouldUpdate(shownDistance, nueva)) shownDistance = nueva
+        isHere = DistanceResolver.isHere(isHere, shownDistance, isNearest)
+    }
+    val etiqueta = shownDistance?.let { if (isHere) "Estás aquí" else DistanceResolver.label(it) }
+
+    // Zoom leve al cambiar el valor, solo en cambios reales.
+    var pulsando by remember { mutableStateOf(false) }
+    var previa by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(etiqueta) {
+        val antes = previa
+        previa = etiqueta
+        if (antes != null && etiqueta != null && antes != etiqueta) {
+            android.util.Log.d("ExploreCarousel", "📏 [distancia] ${place.name}: $antes → $etiqueta")
+            pulsando = true
+            delay(200)
+            pulsando = false
+        }
+    }
+    val escala by animateFloatAsState(
+        targetValue = if (pulsando) 1.15f else 1f,
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow),
+        label = "pulsoDistancia",
+    )
     Column(
         modifier
             .clip(RoundedCornerShape(Radius.md))
@@ -371,6 +428,38 @@ private fun ExploreCarouselCard(
                         .background(BuddyColor.Ink.copy(alpha = 0.45f))
                         .padding(horizontal = 6.dp, vertical = 3.dp),
                 )
+            }
+            // Distancia sobre la foto y no en la ficha: la ficha tiene sus 70dp
+            // repartidos al punto. Solo texto, sin icono. "Estás aquí" en color
+            // de marca: es la única señal que cambia lo que el viajero puede hacer.
+            if (!isSkeleton && etiqueta != null) {
+                AnimatedContent(
+                    targetState = etiqueta,
+                    // Los dígitos ruedan en vez de reemplazarse de golpe.
+                    transitionSpec = {
+                        (slideInVertically { it } + fadeIn()) togetherWith (slideOutVertically { -it } + fadeOut())
+                    },
+                    label = "etiquetaDistancia",
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp)
+                        .graphicsLayer {
+                            scaleX = escala
+                            scaleY = escala
+                            transformOrigin = TransformOrigin(0f, 0f)
+                        }
+                        .clip(RoundedCornerShape(50))
+                        .background(if (isHere) BuddyColor.Brand else BuddyColor.Surface.copy(alpha = 0.85f))
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                ) { texto ->
+                    Text(
+                        texto,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isHere) BuddyColor.InkInverse else BuddyColor.Ink,
+                        maxLines = 1,
+                    )
+                }
             }
             // Una línea y no un degradado: la foto termina donde termina y la
             // ficha empieza donde empieza. Es la misma línea del borde de la

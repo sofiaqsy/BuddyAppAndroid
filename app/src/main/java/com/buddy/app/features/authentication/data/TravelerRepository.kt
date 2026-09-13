@@ -92,11 +92,22 @@ class TravelerRepository @Inject constructor(
 
     /**
      * Fuerza el refresh del JWT (tras un 401 en vuelo) — devuelve el token
-     * nuevo o null si la sesión ya no es recuperable. El mutex evita una
-     * estampida de refreshes cuando varios requests fallan a la vez.
+     * nuevo o null si la sesión ya no es recuperable.
+     *
+     * [failedToken] es el token con el que la petición recibió el 401. El mutex
+     * solo ponía los refreshes EN FILA: con 4 peticiones en 401 a la vez, la
+     * primera renovaba y las otras tres esperaban el lock y renovaban otra vez
+     * cada una. Dentro del lock, si el token guardado ya no es el que falló y
+     * sigue vigente, otra petición ya lo renovó: se reutiliza sin ir a la red.
+     * Mismo arreglo que el RefreshCoalescer de iOS.
      */
-    suspend fun refreshNow(): String? = mutex.withLock {
+    suspend fun refreshNow(failedToken: String? = null): String? = mutex.withLock {
         val current = store.current() ?: return null
+        val actual = current.token
+        if (!actual.isNullOrEmpty() && actual != failedToken && !jwtExpiresSoon(actual)) {
+            Log.d(TAG, "refresh omitido — otra petición ya renovó el token")
+            return actual
+        }
         runCatching { forceRefresh(current) }.getOrNull()
     }
 
