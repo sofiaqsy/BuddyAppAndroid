@@ -258,6 +258,7 @@ fun BuddyRoot() {
                 isApprovedBuddy = conexionesState.isApprovedBuddy,
                 onOpenProfile = { id, nombre, avatar -> perfilAbierto = Triple(id, nombre, avatar) },
                 scrollToTopToken = tripsScrollToTop,
+                onOpenChat = { matchId -> openChatCategory = null; openChatId = matchId },
             )
             AppTab.Conexiones -> ConexionesScreen(modifier, onOpenTrips = { selectedTab = AppTab.Trips })
             AppTab.Yo -> YoScreen(

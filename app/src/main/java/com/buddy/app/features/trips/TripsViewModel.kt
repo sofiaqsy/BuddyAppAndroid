@@ -42,6 +42,8 @@ class TripsViewModel @Inject constructor(
         val isCreating: Boolean = false,
         val activeBuddyName: String? = null,
         val activeBuddyAvatarUrl: String? = null,
+        /** El match del buddy asignado: "¿Una duda en X?" abre ESE chat. */
+        val activeMatchId: String? = null,
         // Fase 2 "Buddy Community Places" — estado separado del de "Registrar
         // trip" a propósito: son dos sheets distintos, no deben compartir
         // resultados de búsqueda ni flags de carga entre sí.
@@ -123,6 +125,7 @@ class TripsViewModel @Inject constructor(
                         journeys = journeys,
                         activeBuddyName = activeMatch?.buddy?.fullName?.split(" ")?.firstOrNull()?.replaceFirstChar { it.uppercase() },
                         activeBuddyAvatarUrl = activeMatch?.buddy?.avatarUrl,
+                        activeMatchId = activeMatch?.id,
                     )
                 }
             } catch (e: Exception) {

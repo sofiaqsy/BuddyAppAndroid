@@ -90,6 +90,8 @@ fun TripsScreen(
     onOpenProfile: (travelerId: String, name: String?, avatarUrl: String?) -> Unit = { _, _, _ -> },
     /** Sube con el re-tap del tab: vuelve arriba (espejo de .tabReselected). */
     scrollToTopToken: Int = 0,
+    /** Abre el chat de un match directamente (overlay de BuddyRoot). */
+    onOpenChat: (matchId: String) -> Unit = {},
     viewModel: TripsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -227,7 +229,10 @@ fun TripsScreen(
                     else showLoginSheet = true
                 },
                 isPublishing = isPublishing,
-                onBuddyTap = onOpenConexiones,
+                // "¿Una duda en X?" abre el chat con el buddy asignado, no la
+                // lista de Conexiones: la pregunta es para esa persona. Sin
+                // match conocido, la lista sigue siendo el camino.
+                onBuddyTap = { state.activeMatchId?.let(onOpenChat) ?: onOpenConexiones() },
                 // El menú ⋯ al final de la cabecera de la tarjeta, en fila con
                 // el resto: flotando encima se montaba sobre "Desde hoy".
                 headerTrailing = { TripActionsMenu(onCancelTrip = { showCancelConfirm = true }) },
