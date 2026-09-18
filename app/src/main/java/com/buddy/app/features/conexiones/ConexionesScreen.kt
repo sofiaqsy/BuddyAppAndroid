@@ -101,12 +101,6 @@ fun ConexionesScreen(
         // ── Header — misma voz que el tab Trips ───────────────────────────
         Column(Modifier.padding(horizontal = Spacing.edge, vertical = Spacing.md)) {
             Text(
-                "TU GENTE",
-                style = BuddyType.Eyebrow.copy(letterSpacing = 2.sp),
-                color = BuddyColor.InkMuted,
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
                 buildAnnotatedString {
                     withStyle(SpanStyle(color = BuddyColor.Ink)) { append("Tus ") }
                     withStyle(SpanStyle(color = BuddyColor.Brand)) { append("conexiones.") }

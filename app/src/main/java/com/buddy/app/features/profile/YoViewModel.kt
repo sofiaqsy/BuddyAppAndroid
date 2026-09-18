@@ -46,17 +46,10 @@ class YoViewModel @Inject constructor(
         val avatarUploadFailed: Boolean = false,
         val deletePublicationFailed: Boolean = false,
     ) {
-        /** "N trips · N stickers" — igual que metaLine (iOS). */
+        /** "N trips" — igual que metaLine (iOS). Sin la cuenta de stickers:
+         *  la sección salió del perfil y contar algo que no se ve confunde. */
         val metaLine: String
-            get() {
-                val trips = if (journeys.size == 1) "1 trip" else "${journeys.size} trips"
-                val st = when {
-                    stickers.isEmpty() -> null
-                    stickers.size == 1 -> "1 sticker"
-                    else -> "${stickers.size} stickers"
-                }
-                return listOfNotNull(trips, st).joinToString(" · ")
-            }
+            get() = if (journeys.size == 1) "1 trip" else "${journeys.size} trips"
     }
 
     private val _state = MutableStateFlow(State())

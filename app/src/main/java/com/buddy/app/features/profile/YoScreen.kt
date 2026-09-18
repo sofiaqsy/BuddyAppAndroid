@@ -201,8 +201,6 @@ fun YoScreen(
             verticalAlignment = Alignment.Top,
         ) {
             Column(Modifier.weight(1f)) {
-                Text("TU PERFIL", style = BuddyType.Eyebrow.copy(letterSpacing = 2.sp), color = BuddyColor.InkMuted)
-                Spacer(Modifier.height(4.dp))
                 Text(
                     buildAnnotatedString {
                         withStyle(SpanStyle(color = BuddyColor.Ink)) { append("Tu ") }
@@ -261,19 +259,15 @@ fun YoScreen(
                     modifier = Modifier.padding(horizontal = Spacing.edge),
                 )
             }
-            Spacer(Modifier.height(Spacing.xl))
-            // 4 — Colección
-            StickerSection(state)
+            // La colección de stickers salió del perfil (iOS igual). Los datos se
+            // siguen cargando; solo deja de mostrarse la sección.
 
             // Visible si PUEDE aportar (necesita la entrada) o si ya aportó —
             // a quien ya recomendó no se le esconde lo suyo aunque su
             // verificación haya cambiado después.
             val puedeRecomendar = state.buddyMe?.profile?.verificationStatus == "approved"
             if (puedeRecomendar || state.shares.isNotEmpty()) {
-                // El pie de STICKERS es texto suelto, sin margen propio: sin
-                // esto el antetítulo se le pegaba y las dos secciones se leían
-                // como una.
-                Spacer(Modifier.height(Spacing.lg))
+                Spacer(Modifier.height(Spacing.xl))
                 LugaresQueRecomiendasSection(
                     shares = state.shares,
                     puedeRecomendar = puedeRecomendar,
