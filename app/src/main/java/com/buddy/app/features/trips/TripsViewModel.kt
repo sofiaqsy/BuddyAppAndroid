@@ -110,11 +110,11 @@ class TripsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 travelerRepo.ensureSession()
-                val journeys = tripRepo.myJourneys()
+                val journeys = tripRepo.myJourneys("trips:load")
                 // Match activo para la fila del buddy (como activeMatch en iOS)
                 val hasActive = journeys.any { it.tripId != null && it.status == "active" }
                 val activeMatch = if (hasActive) {
-                    runCatching { matchingRepo.matches() }.getOrDefault(emptyList())
+                    runCatching { matchingRepo.matches("trips:load") }.getOrDefault(emptyList())
                         .firstOrNull { it.status in listOf("pending", "accepted", "active") }
                 } else null
                 _state.update { s ->

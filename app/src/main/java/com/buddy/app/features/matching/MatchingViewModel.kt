@@ -229,7 +229,8 @@ class MatchingViewModel @Inject constructor(
 
     private suspend fun transitionToMatched() {
         val category = (_state.value as? SearchState.Searching)?.category
-        val active = runCatching { repo.matches() }.getOrNull()
+        // Espera activa de un buddy: nunca del snapshot.
+        val active = runCatching { repo.refreshMatches("buddyPolling") }.getOrNull()
             ?.firstOrNull { it.status in listOf("pending", "accepted", "active") } ?: return
         stopStreams()
         _state.value = SearchState.Matched(active.id, active.buddy, category)

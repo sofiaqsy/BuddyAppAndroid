@@ -53,6 +53,7 @@ class HomeViewModel @Inject constructor(
     private val sessionStore: com.buddy.app.core.data.SessionStore,
     private val sse: com.buddy.app.core.network.SseClient,
     private val spotsRepo: SpotsRepository,
+    private val journeysStore: com.buddy.app.core.data.store.JourneysStore,
 ) : ViewModel() {
 
     data class HomeState(
@@ -308,7 +309,7 @@ class HomeViewModel @Inject constructor(
         // uno de esos, con status="active" y sin trip, se colaba como si fuera
         // TU viaje en curso en el Home — mismo bug encontrado y arreglado en
         // TripsViewModel, confirmado en logs de dispositivo iOS.
-        val journeys = runCatching { api.myJourneys() }.getOrDefault(emptyList()).filter { it.tripId != null }
+        val journeys = runCatching { journeysStore.load("inicio:loadTripAndMatch") }.getOrDefault(emptyList()).filter { it.tripId != null }
         val active = journeys.firstOrNull { it.status == "active" }
             ?: journeys.firstOrNull { it.status == "planning" }
         // Todos los trips vivos, activos primero — igual que liveJourneys (iOS).
@@ -316,7 +317,7 @@ class HomeViewModel @Inject constructor(
             .filter { it.status == "active" || it.status == "planning" }
             .sortedBy { if (it.status == "active") 0 else 1 }
         val match = if (active != null) {
-            runCatching { matchingApi.matches() }.getOrDefault(emptyList())
+            runCatching { matchingRepo.matches("inicio:loadTripAndMatch") }.getOrDefault(emptyList())
                 .firstOrNull { it.status in listOf("accepted", "active", "pending") }
         } else null
 

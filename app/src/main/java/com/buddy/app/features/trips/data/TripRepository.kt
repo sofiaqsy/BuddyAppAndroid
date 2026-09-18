@@ -16,8 +16,10 @@ import javax.inject.Singleton
 @Singleton
 class TripRepository @Inject constructor(
     private val api: HomeApi,
+    private val journeysStore: com.buddy.app.core.data.store.JourneysStore,
 ) {
-    suspend fun myJourneys(): List<ApiJourney> = api.myJourneys()
+    /** Pasa por el store: Home y Trips comparten una sola lectura reciente. */
+    suspend fun myJourneys(trigger: String = "trips"): List<ApiJourney> = journeysStore.load(trigger)
 
     suspend fun ensureActiveTrip(destinationId: String): ApiJourney {
         val journeys = runCatching { api.myJourneys() }.getOrDefault(emptyList())

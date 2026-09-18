@@ -25,6 +25,7 @@ class ActiveRequestExists(val requestId: String?) : Exception("active_request_ex
 class MatchingRepository @Inject constructor(
     private val api: MatchingApi,
     private val sse: SseClient,
+    private val matchingStore: com.buddy.app.core.data.store.MatchingStore,
 ) {
     /**
      * Mi solicitud abierta, o null si no tengo ninguna.
@@ -61,7 +62,12 @@ class MatchingRepository @Inject constructor(
 
     suspend fun status(requestId: String): ApiMatchingStatus = api.matchingStatus(requestId)
 
-    suspend fun matches(): List<ApiMatch> = api.matches()
+    /** Para pantallas que MUESTRAN matches: pasa por el store (ventana de 3 s
+     *  y una sola petición en vuelo). */
+    suspend fun matches(trigger: String = "repo"): List<ApiMatch> = matchingStore.load(trigger)
+
+    /** Para quien ESPERA un buddy: siempre al servidor. */
+    suspend fun refreshMatches(trigger: String): List<ApiMatch> = matchingStore.refresh(trigger)
 
     suspend fun myOffers(): List<ApiBuddyOffer> = api.myOffers()
 

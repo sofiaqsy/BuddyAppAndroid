@@ -223,7 +223,7 @@ class ConexionesViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val myId = sessionStore.current()?.travelerId
-                val matches = repo.matches()
+                val matches = repo.matches("conexiones:load")
                 val cached = _state.value.connections.associateBy { it.match.id }
                 val items = coroutineScope {
                     matches.map { match ->

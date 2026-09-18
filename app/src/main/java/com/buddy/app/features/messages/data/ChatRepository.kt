@@ -25,8 +25,9 @@ import javax.inject.Singleton
 class ChatRepository @Inject constructor(
     private val api: MatchingApi,
     private val sse: SseClient,
+    private val matchingStore: com.buddy.app.core.data.store.MatchingStore,
 ) {
-    suspend fun matches(): List<ApiMatch> = api.matches()
+    suspend fun matches(): List<ApiMatch> = matchingStore.load("chat")
 
     suspend fun messages(matchId: String, limit: Int = 30, before: String? = null): List<ApiMessage> =
         api.messages(matchId, limit, before)
