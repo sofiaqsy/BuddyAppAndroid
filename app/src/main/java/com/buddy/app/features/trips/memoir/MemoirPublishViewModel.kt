@@ -26,18 +26,26 @@ class MemoirPublishViewModel @Inject constructor(
     suspend fun publish(journey: ApiJourney, pages: List<CollagePage>, persistence: MemoirPersistence) {
         withContext(Dispatchers.IO) {
             try {
-                val parts = pages.mapIndexedNotNull { index, page ->
-                    val filename = page.thumbnailFileName ?: return@mapIndexedNotNull null
+                val parts = pages.flatMapIndexed { index, page ->
+                    val filename = page.thumbnailFileName ?: return@flatMapIndexed emptyList()
                     val file = persistence.thumbnailFile(filename, journey.id)
-                    if (!file.exists()) return@mapIndexedNotNull null
-                    MultipartBody.Part.createFormData(
-                        "page_$index", "page_$index.jpg",
-                        file.asRequestBody("image/jpeg".toMediaType()),
+                    if (!file.exists()) return@flatMapIndexed emptyList()
+                    listOf(
+                        MultipartBody.Part.createFormData(
+                            "page_$index", "page_$index.jpg",
+                            file.asRequestBody("image/jpeg".toMediaType()),
+                        ),
+                        // El id de la página viaja junto a su archivo (espejo de
+                        // iOS). buddy-core lo exige: con él actualiza esa fila en
+                        // su sitio en vez de borrar y reinsertar el journey, que
+                        // resucitaba fotos borradas. Sin él responde 400 y la
+                        // foto nunca se publicaba desde Android.
+                        MultipartBody.Part.createFormData("client_page_id_$index", page.id),
                     )
                 }
                 if (parts.isNotEmpty()) {
                     api.uploadJourneyPages(journey.id, parts)
-                    Log.d(TAG, "uploaded ${parts.size} page(s) for ${journey.id.take(8)}")
+                    Log.d(TAG, "uploaded ${parts.size / 2} page(s) for ${journey.id.take(8)}")
                 }
                 api.publishJourney(journey.id, PublishBody(status = "completed", isPublic = true))
                 journey.tripId?.let {
