@@ -157,7 +157,10 @@ fun InicioScreen(
     // DENTRO de la conversación, y esa vive fuera de esta pantalla.
 
     Column(
-        modifier.fillMaxSize().background(BuddyColor.Canvas).verticalScroll(rememberScrollState()),
+        modifier.fillMaxSize().background(BuddyColor.Canvas)
+            // Mientras se hace pinch sobre una foto del carrusel, la pantalla
+            // queda quieta (igual que iOS con scrollDisabled).
+            .verticalScroll(rememberScrollState(), enabled = !CarouselZoom.isZooming),
     ) {
         Spacer(Modifier.height(Spacing.md))
 

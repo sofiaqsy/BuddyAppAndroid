@@ -13,6 +13,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.ui.input.pointer.pointerInput
 import com.buddy.app.core.location.DistanceResolver
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.background
@@ -45,6 +50,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.ContentScale
@@ -72,8 +78,19 @@ import kotlin.math.min
 // visual y el efecto se pierde. La fila siempre reserva este ancho por card;
 // scale + zIndex dibujan la del centro invadiendo el espacio de sus vecinas,
 // como el carrusel destacado de la App Store.
-private val CardWidth = 176.dp
-private val PhotoHeight = 228.dp
+// Tamaño final de iOS: la foto creció 15% + 10% + 10% + 10% sobre la base
+// 160×207, y todo el bloque escala con la pantalla hasta un 30% más, siempre
+// que tarjetas + "Consultar a buddies" quepan en una pantalla (la tarjeta, ya
+// escalada al centro, no pasa del 55% del alto).
+private const val PhotoExtra = 1.15f * 1.10f * 1.10f * 1.10f
+private val ScreenHeightDp: Float =
+    android.content.res.Resources.getSystem().displayMetrics.let { it.heightPixels / it.density }
+private val SizeFactor: Float = run {
+    val maxCardHeight = ScreenHeightDp * 0.55f / (1f + 0.22f)
+    ((maxCardHeight - 70f) / (207f * PhotoExtra)).coerceIn(1f, 1.3f)
+}
+private val CardWidth = (160f * SizeFactor).dp
+private val PhotoHeight = (207f * PhotoExtra * SizeFactor).dp
 /** La banda de texto mide 70: 7 de aire arriba, 8 (categoría) + 3 + 20 (nombre)
  *  + 3 + 20 (autor) = 54, y 7 abajo. */
 private val CardHeight = PhotoHeight + 70.dp
@@ -85,7 +102,26 @@ private const val ScaleDelta = 0.22f
 
 /** Distancia a la que una card ya está completamente "al fondo". En dp, no en
  *  píxeles: iOS la expresa en puntos y hay que convertirla, no copiarla. */
-private val ScaleFalloff = 160.dp
+private val ScaleFalloff = 160.dp  // referencia; la curva usa el paso real
+
+/**
+ * Escala por distancia al centro, con suavizado (smoothstep). Espejo del
+ * arreglo de iOS: la normalización usaba una constante vieja (160) en vez del
+ * paso real entre tarjetas, y la curva lineal hacía que el cambio de card se
+ * sintiera "de golpe". Con el paso real y la curva suave, la tarjeta crece y
+ * decrece de forma continua.
+ */
+private fun escalaPara(distancia: Float, pasoPx: Float): Float {
+    val n = min(distancia / pasoPx, 1f)
+    val suave = n * n * (3f - 2f * n)
+    return 1f + (1f - suave) * ScaleDelta
+}
+
+/** true mientras se hace pinch sobre una foto: la fila y la pantalla dejan de
+ *  desplazarse, como en iOS (CarouselZoomState). */
+object CarouselZoom {
+    var isZooming by mutableStateOf(false)
+}
 
 /** Aire vertical que la fila reserva ARRIBA Y ABAJO para que la card escalada
  *  no se recorte. scale no altera el layout, así que la fila mide CardHeight y
@@ -165,7 +201,7 @@ fun ExploreCarousel(
         // PÍXELES. Comparar 160 contra píxeles lo hacía ~3× más estrecho en un
         // teléfono de densidad 3: casi ninguna card llegaba a escalar y el
         // tamaño saltaba de golpe en vez de degradarse.
-        val falloffPx = with(density) { ScaleFalloff.toPx() }
+        val falloffPx = with(density) { (CardWidth + CardSpacing).toPx() }
 
         // Índice de la card centrada — fuente de verdad única para el zIndex y
         // para decidir si un tap abre el lugar o solo lo centra. Derivado del
@@ -193,7 +229,7 @@ fun ExploreCarousel(
                     val info = listState.layoutInfo
                     val vis = info.visibleItemsInfo.map { i ->
                         val mid = centroDe(i, info)
-                        val s = 1f + (1f - min(abs(mid - viewportCenterPx) / falloffPx, 1f)) * ScaleDelta
+                        val s = escalaPara(abs(mid - viewportCenterPx), falloffPx)
                         "[${i.index}] off=${i.offset} size=${i.size} mid=${mid.toInt()} d=${(mid - viewportCenterPx).toInt()} scale=${"%.2f".format(s)}"
                     }
                     android.util.Log.d(
@@ -208,7 +244,7 @@ fun ExploreCarousel(
         androidx.compose.runtime.LaunchedEffect(centerIndex) {
             val vis = listState.layoutInfo.visibleItemsInfo.map { i ->
                 val mid = i.offset + i.size / 2f
-                val s = 1f + (1f - min(abs(mid - viewportCenterPx) / falloffPx, 1f)) * ScaleDelta
+                val s = escalaPara(abs(mid - viewportCenterPx), falloffPx)
                 "[${i.index}] mid=${mid.toInt()} d=${(mid - viewportCenterPx).toInt()} scale=${"%.2f".format(s)}"
             }
             android.util.Log.d(
@@ -225,7 +261,7 @@ fun ExploreCarousel(
             // a mitad de camino y ninguna es "la del medio", que es justo lo
             // que el zIndex y el tap necesitan saber.
             flingBehavior = rememberSnapFlingBehavior(listState),
-            userScrollEnabled = !isSkeleton,
+            userScrollEnabled = !isSkeleton && !CarouselZoom.isZooming,
             // CenterVertically y no el Top por defecto.
             //
             // La card crece un 22% alrededor de SU CENTRO. Alineada arriba, ese
@@ -264,7 +300,7 @@ fun ExploreCarousel(
                             val distance = item
                                 ?.let { abs(centroDe(it, info) - viewportCenterPx) }
                                 ?: falloffPx
-                            val s = 1f + (1f - min(distance / falloffPx, 1f)) * ScaleDelta
+                            val s = escalaPara(distance, falloffPx)
                             scaleX = s
                             scaleY = s
                         }
@@ -398,14 +434,55 @@ private fun ExploreCarouselCard(
             Modifier
                 .fillMaxWidth()
                 .height(PhotoHeight)
+                // El zoom se queda dentro de la foto: no invade la banda de texto.
+                .clipToBounds()
                 .background(BuddyColor.SurfaceRaised),
         ) {
             if (photo.url != null) {
+                // Pinch para acercar la foto (el gesto instintivo al mirar una
+                // foto). Solo con dos dedos: con uno el arrastre sigue siendo de
+                // la fila. Al soltar vuelve a su tamaño. Mientras dura, ni la
+                // fila ni la pantalla se mueven.
+                var zoom by remember { mutableStateOf(1f) }
+                var ancla by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Unspecified) }
+                val zoomAnimado by animateFloatAsState(
+                    targetValue = zoom,
+                    animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMedium),
+                    label = "zoomFoto",
+                )
                 AsyncImage(
                     model = photo.url,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxWidth().height(PhotoHeight),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(PhotoHeight)
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                do {
+                                    val event = awaitPointerEvent()
+                                    if (event.changes.count { it.pressed } >= 2) {
+                                        CarouselZoom.isZooming = true
+                                        zoom = (zoom * event.calculateZoom()).coerceIn(1f, 4f)
+                                        ancla = event.calculateCentroid(useCurrent = true)
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                } while (event.changes.any { it.pressed })
+                                CarouselZoom.isZooming = false
+                                zoom = 1f
+                            }
+                        }
+                        .graphicsLayer {
+                            scaleX = zoomAnimado
+                            scaleY = zoomAnimado
+                            if (ancla != androidx.compose.ui.geometry.Offset.Unspecified && size.width > 0f) {
+                                transformOrigin = TransformOrigin(
+                                    (ancla.x / size.width).coerceIn(0f, 1f),
+                                    (ancla.y / size.height).coerceIn(0f, 1f),
+                                )
+                            }
+                        },
                 )
             }
             // Un lugar propuesto y aún sin aprobar. Va SOBRE la foto y no al pie
