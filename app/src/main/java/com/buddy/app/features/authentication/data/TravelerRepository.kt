@@ -31,7 +31,14 @@ class TravelerRepository @Inject constructor(
 
     val session: Flow<TravelerSession?> = store.session
 
+    val needsReauth: Flow<Boolean> = store.needsReauth
+
     suspend fun ensureSession(): String = mutex.withLock {
+        // Cuenta verificada esperando login: ni refresh ni guest nuevo.
+        if (store.isAwaitingReauth()) {
+            Log.w(TAG, "sesión verificada expirada — esperando login, no se crea guest")
+            throw SessionExpiredException()
+        }
         val current = store.current()
         if (current != null) return refreshIfNeeded(current)
 
@@ -41,7 +48,19 @@ class TravelerRepository @Inject constructor(
 
     private suspend fun createGuestSession(): String {
         val deviceId = store.deviceId()
-        val res = api.initTraveler(InitRequest(deviceId))
+        val res = try {
+            api.initTraveler(InitRequest(deviceId))
+        } catch (e: HttpException) {
+            // El backend ya no reutiliza sesiones verificadas en /init: responde
+            // 409 account_requires_auth. Eso NO es "crea un guest": es "pide
+            // login". Crear otro aquí era el bug que duplicaba cuentas.
+            if (e.code() == 409) {
+                Log.w(TAG, "init → 409: este dispositivo tiene una cuenta verificada — pido login")
+                store.markNeedsReauth()
+                throw SessionExpiredException()
+            }
+            throw e
+        }
         store.saveGuest(res.travelerId, res.token, res.secret)
         Log.d(TAG, "guest created → ${res.travelerId.take(8)}")
         return res.token
@@ -56,9 +75,11 @@ class TravelerRepository @Inject constructor(
     private suspend fun forceRefresh(session: TravelerSession): String {
         val secret = store.secret()
         if (secret == null) {
-            // Verified sin secret: si el refresh social falla, la sesión expiró.
-            Log.w(TAG, "verified refresh no implementado sin secret — clearing")
-            store.clear()
+            // Sin secret no hay refresh. Antes esto borraba la sesión y el
+            // siguiente ensureSession creaba un guest nuevo: la cuenta
+            // verificada "desaparecía". expire() la conserva y pide login.
+            Log.w(TAG, "refresh imposible sin secret — sesión expirada")
+            store.expire()
             throw SessionExpiredException()
         }
         try {
@@ -68,8 +89,10 @@ class TravelerRepository @Inject constructor(
             return res.token
         } catch (e: HttpException) {
             if (e.code() == 401) {
-                Log.w(TAG, "guest refresh 401 — clearing stale session")
-                store.clear()
+                // Guest: se borra y puede crearse otro. Verified: se conserva y
+                // se pide login (SessionStore.expire decide cuál).
+                Log.w(TAG, "refresh 401 — sesión expirada")
+                store.expire()
                 throw SessionExpiredException()
             }
             throw e

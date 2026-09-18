@@ -30,6 +30,11 @@ import com.buddy.app.features.trips.TripsScreen
  */
 @Composable
 fun BuddyRoot() {
+    // Sesión verificada expirada (p. ej. tras reinstalar): pedir login con la
+    // misma cuenta en vez de seguir como un guest nuevo. Espejo del sheet
+    // IdentitySheet(purpose: .reauth) de iOS.
+    ReauthPrompt()
+
     var selectedTab by rememberSaveable { mutableStateOf(AppTab.Inicio) }
     // Conserva el estado de cada tab mientras no está en pantalla.
     val tabStateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
@@ -296,4 +301,50 @@ fun BuddyRoot() {
         }
     }
     }
+}
+
+
+/** "Tu sesión expiró" — la cuenta sigue existiendo; se recupera iniciando
+ *  sesión con la misma cuenta de Google. No se puede cerrar sin elegir:
+ *  descartarlo dejaría a la app sin sesión válida. */
+@Composable
+private fun ReauthPrompt(
+    sessionVm: com.buddy.app.features.authentication.SessionViewModel =
+        androidx.hilt.navigation.compose.hiltViewModel(),
+) {
+    val needsReauth by sessionVm.needsReauth.collectAsState()
+    val isSigningIn by sessionVm.isSigningIn.collectAsState()
+    val error by sessionVm.error.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    if (!needsReauth) return
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = {},
+        containerColor = BuddyColor.Surface,
+        title = {
+            androidx.compose.material3.Text(
+                "Tu sesión expiró",
+                style = com.buddy.app.core.designsystem.BuddyType.Headline,
+                color = BuddyColor.Ink,
+            )
+        },
+        text = {
+            androidx.compose.material3.Text(
+                error ?: "Inicia sesión de nuevo con tu cuenta para recuperar tus trips y tu perfil.",
+                style = com.buddy.app.core.designsystem.BuddyType.Subhead,
+                color = if (error != null) BuddyColor.ErrorRed else BuddyColor.InkMuted,
+            )
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(
+                onClick = { sessionVm.signInWithGoogle(context) },
+                enabled = !isSigningIn,
+            ) {
+                androidx.compose.material3.Text(
+                    if (isSigningIn) "Conectando…" else "Continuar con Google",
+                    style = com.buddy.app.core.designsystem.BuddyType.FootnoteBold,
+                    color = BuddyColor.Brand,
+                )
+            }
+        },
+    )
 }

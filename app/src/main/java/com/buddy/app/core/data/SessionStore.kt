@@ -1,6 +1,7 @@
 package com.buddy.app.core.data
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -33,6 +34,39 @@ class SessionStore @Inject constructor(@ApplicationContext private val context: 
         val Secret     = stringPreferencesKey("traveler_secret")
         val DeviceId   = stringPreferencesKey("device_id")
         val FullName   = stringPreferencesKey("full_name")
+        val NeedsReauth = booleanPreferencesKey("needs_reauth")
+    }
+
+    /**
+     * true cuando una cuenta VERIFICADA no pudo renovar su sesión y hay que
+     * pedirle que inicie sesión otra vez. Mientras esté en true no se crea
+     * ningún guest: un fallo de autenticación no es creación de cuenta
+     * (ARCHITECTURE.md, regla de sesión). Va aparte de `session` porque tras
+     * reinstalar puede no haber ningún traveler guardado y aun así haber que
+     * pedir el login (el backend responde 409 account_requires_auth).
+     */
+    val needsReauth: Flow<Boolean> = context.sessionDataStore.data.map { it[Keys.NeedsReauth] == true }
+
+    suspend fun isAwaitingReauth(): Boolean = needsReauth.first()
+
+    /** Marca la reautenticación sin traveler guardado (409 de /travelers/init). */
+    suspend fun markNeedsReauth() {
+        context.sessionDataStore.edit { it[Keys.NeedsReauth] = true }
+    }
+
+    /**
+     * Una sesión que no se pudo renovar — espejo de expireSession() (iOS).
+     * Un guest se borra entero y puede crearse otro. Una cuenta verificada
+     * conserva su id y su status, pierde solo el token, y queda marcada para
+     * pedir login: nunca pasa a guest en silencio.
+     */
+    suspend fun expire() {
+        val verified = current()?.isVerified == true
+        if (!verified) { clear(); return }
+        context.sessionDataStore.edit { p ->
+            p.remove(Keys.Token)
+            p[Keys.NeedsReauth] = true
+        }
     }
 
     val session: Flow<TravelerSession?> = context.sessionDataStore.data.map { p ->
@@ -87,6 +121,7 @@ class SessionStore @Inject constructor(@ApplicationContext private val context: 
             it[Keys.Status] = status
             if (secret != null) it[Keys.Secret] = secret else it.remove(Keys.Secret)
             if (fullName != null) it[Keys.FullName] = fullName
+            it.remove(Keys.NeedsReauth)
         }
     }
 
@@ -94,6 +129,9 @@ class SessionStore @Inject constructor(@ApplicationContext private val context: 
         context.sessionDataStore.edit { p ->
             p.remove(Keys.TravelerId); p.remove(Keys.Token)
             p.remove(Keys.Status); p.remove(Keys.Secret); p.remove(Keys.FullName)
+            // clear() es SOLO el cierre de sesión intencional: después sí se
+            // puede crear un guest. Una sesión que expiró pasa por expire().
+            p.remove(Keys.NeedsReauth)
             // device_id se conserva — igual que iOS conserva identifierForVendor
         }
     }

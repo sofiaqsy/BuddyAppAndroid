@@ -34,6 +34,11 @@ class SessionViewModel @Inject constructor(
     val session: StateFlow<TravelerSession?> = travelerRepo.session
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    /** Cuenta verificada cuya sesión expiró: hay que pedir login, no crear
+     *  un guest. BuddyRoot muestra el aviso "Tu sesión expiró". */
+    val needsReauth: StateFlow<Boolean> = travelerRepo.needsReauth
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     private val _isSigningIn = MutableStateFlow(false)
     val isSigningIn: StateFlow<Boolean> = _isSigningIn.asStateFlow()
 
