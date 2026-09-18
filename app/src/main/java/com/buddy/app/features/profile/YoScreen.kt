@@ -766,6 +766,23 @@ private fun LugaresQueRecomiendasSection(
                                 modifier = Modifier.fillMaxSize(),
                             )
                         }
+                        // Propuesto y aún sin revisar: solo lo ve quien lo propuso
+                        // hasta que se apruebe. Decirlo evita que parezca publicado
+                        // (mismo badge que iOS). Sin icono de alerta: es una espera,
+                        // no un problema del usuario.
+                        if (lugar.estaPendiente) {
+                            Text(
+                                "Pendiente de aprobación",
+                                style = BuddyType.Caption2,
+                                color = BuddyColor.Ink,
+                                maxLines = 1,
+                                modifier = Modifier
+                                    .padding(6.dp)
+                                    .clip(RoundedCornerShape(50))
+                                    .background(BuddyColor.WarningAmber.copy(alpha = 0.9f))
+                                    .padding(horizontal = 6.dp, vertical = 3.dp),
+                            )
+                        }
                     }
                     Column(Modifier.padding(horizontal = 8.dp, vertical = 7.dp)) {
                         Text(lugar.name, style = BuddyType.Caption1, color = BuddyColor.Ink, maxLines = 1)
