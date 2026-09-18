@@ -16,3 +16,6 @@ app/google-services.json
 # Llaves de firma: el repo es público, nunca deben viajar a GitHub.
 *.jks
 *.keystore
+
+# Certificados exportados de las llaves de firma.
+*.pem
