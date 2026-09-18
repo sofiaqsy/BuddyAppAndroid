@@ -771,14 +771,16 @@ private fun LugaresQueRecomiendasSection(
                         // (mismo badge que iOS). Sin icono de alerta: es una espera,
                         // no un problema del usuario.
                         if (lugar.estaPendiente) {
+                            // Dos líneas: la tarjeta mide 119 de ancho y en una
+                            // sola el texto se cortaba ("Pendiente de apro…").
                             Text(
-                                "Pendiente de aprobación",
+                                "Pendiente de\naprobación",
                                 style = BuddyType.Caption2,
                                 color = BuddyColor.Ink,
-                                maxLines = 1,
+                                maxLines = 2,
                                 modifier = Modifier
                                     .padding(6.dp)
-                                    .clip(RoundedCornerShape(50))
+                                    .clip(RoundedCornerShape(8.dp))
                                     .background(BuddyColor.WarningAmber.copy(alpha = 0.9f))
                                     .padding(horizontal = 6.dp, vertical = 3.dp),
                             )
