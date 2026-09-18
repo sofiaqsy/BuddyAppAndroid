@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.background
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.input.pointer.pointerInput
 import com.buddy.app.core.designsystem.BuddyColor
 import com.buddy.app.features.conexiones.ConexionesScreen
@@ -171,13 +172,21 @@ fun BuddyRoot() {
         },
     ) { padding ->
         val modifier = Modifier.padding(padding)
-        // `when` descompone el tab que dejas, y con él se pierde todo el estado
-        // local: posición de scroll, sheets, campos a medio llenar. Los datos
-        // seguían en el ViewModel (scope de Activity), pero la lista volvía
-        // arriba y se sentía como si recargara. SaveableStateProvider guarda y
-        // restaura ese estado por tab, que es lo que hace el TabView de iOS.
-        tabStateHolder.SaveableStateProvider(selectedTab) {
-        when (selectedTab) {
+        // Los tabs se quedan VIVOS una vez visitados, como el TabView de iOS.
+        // Antes `when` descomponía el tab que dejabas y al volver se armaba de
+        // cero: carrusel, fotos, escalas y efectos de entrada otra vez — se veía
+        // como si Inicio recargara. SaveableStateProvider solo devolvía el
+        // scroll; todo lo demás se rehacía. Ahora el tab oculto sigue compuesto
+        // pero no se coloca: no se dibuja ni recibe toques, y al volver está tal
+        // como lo dejaste. Se compone la primera vez que se visita, no al
+        // arrancar, para no cargar cuatro pantallas de golpe.
+        var visitedTabs by androidx.compose.runtime.remember { mutableStateOf(setOf(selectedTab)) }
+        if (selectedTab !in visitedTabs) visitedTabs = visitedTabs + selectedTab
+        Box(Modifier.fillMaxSize()) {
+        AppTab.entries.filter { it in visitedTabs }.forEach { tab ->
+        androidx.compose.runtime.key(tab) {
+        Box(Modifier.fillMaxSize().soloSiVisible(tab == selectedTab)) {
+        when (tab) {
             AppTab.Inicio -> InicioScreen(
                 modifier,
                 onOpenTrips = { selectedTab = AppTab.Trips },
@@ -271,6 +280,9 @@ fun BuddyRoot() {
             )
         }
         }
+        }
+        }
+        }
     }
 
     // El de debajo sigue compuesto, así que volver devuelve el Home tal como
@@ -348,3 +360,16 @@ private fun ReauthPrompt(
         },
     )
 }
+
+
+/** Mide el contenido pero solo lo coloca si está visible. Un nodo sin colocar
+ *  no se dibuja ni recibe toques, pero sigue compuesto: conserva su estado. */
+private fun Modifier.soloSiVisible(visible: Boolean): Modifier =
+    this.then(
+        Modifier.layout { measurable, constraints ->
+            val placeable = measurable.measure(constraints)
+            layout(placeable.width, placeable.height) {
+                if (visible) placeable.place(0, 0)
+            }
+        },
+    )
