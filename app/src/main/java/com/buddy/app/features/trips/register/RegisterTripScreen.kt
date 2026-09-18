@@ -96,15 +96,18 @@ fun RegisterTripScreen(
             }
         }
 
-        // Eyebrow — refleja si ya está en destino o planifica
-        Text(
-            if (state.quickOption == QuickOption.Here) "DÓNDE ESTÁS AHORA" else "TU PRÓXIMO TRIP",
-            style = BuddyType.Eyebrow.copy(letterSpacing = 2.sp),
-            color = BuddyColor.InkMuted,
-            modifier = Modifier.padding(horizontal = Spacing.edge, vertical = Spacing.md),
-        )
+        // Eyebrow solo al planificar: si ya está en el lugar el campo viene
+        // prellenado y no hace falta título (iOS quitó "DÓNDE ESTÁS AHORA").
+        if (state.quickOption != QuickOption.Here) {
+            Text(
+                "TU PRÓXIMO TRIP",
+                style = BuddyType.Eyebrow.copy(letterSpacing = 2.sp),
+                color = BuddyColor.InkMuted,
+                modifier = Modifier.padding(horizontal = Spacing.edge, vertical = Spacing.md),
+            )
+        }
 
-        SectionLabel("¿DÓNDE ESTÁS O A DÓNDE VAS?")
+        SectionLabel("¿DÓNDE ESTÁS?")
 
         // ── Search field ──────────────────────────────────────────────────
         Row(

@@ -9,6 +9,7 @@ import com.buddy.app.core.data.model.ApiPlaceContext
 import com.buddy.app.core.data.model.ApiPlaceResult
 import com.buddy.app.features.home.data.CreateJourneyBody
 import com.buddy.app.features.home.data.HomeApi
+import com.buddy.app.features.home.data.ResolveRequest
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -32,6 +33,7 @@ enum class QuickOption { Here, Today, Tomorrow }
 @HiltViewModel
 class RegisterTripViewModel @Inject constructor(
     private val api: HomeApi,
+    private val locationProvider: com.buddy.app.core.location.LocationProvider,
 ) : ViewModel() {
 
     data class State(
@@ -64,7 +66,38 @@ class RegisterTripViewModel @Inject constructor(
     private var searchJob: Job? = null
     private var contextJob: Job? = null
 
-    init { loadPopular() }
+    init {
+        loadPopular()
+        prefillCurrentLocation()
+    }
+
+    /**
+     * Prellena el campo con el lugar donde el usuario está (espejo de iOS): el
+     * GPS se resuelve contra el backend y el destino queda seleccionado, así
+     * "Ya estoy aquí" no obliga a buscar el sitio donde ya estás. Sin permiso,
+     * sin fix o sin destino resuelto, el formulario se queda vacío como antes.
+     *
+     * Se selecciona como resultado de fuente "destination": createTrip ya sabe
+     * mandar ese id como destination_id, no hace falta otra ruta.
+     */
+    private fun prefillCurrentLocation() {
+        if (!locationProvider.hasPermission()) return
+        viewModelScope.launch {
+            val loc = runCatching { locationProvider.currentLocation() }.getOrNull() ?: return@launch
+            val res = runCatching { api.resolveLocation(ResolveRequest(loc.lat, loc.lng)) }.getOrNull()
+            val resolved = res?.body() ?: return@launch
+            // Si el usuario ya escribió o eligió algo mientras tanto, no se pisa.
+            val s = _state.value
+            if (s.searchText.isNotEmpty() || s.hasSelection) return@launch
+            selectPlace(
+                ApiPlaceResult(
+                    id = resolved.destinationId,
+                    source = "destination",
+                    title = resolved.destinationName,
+                ),
+            )
+        }
+    }
 
     fun loadPopular() {
         _state.update { it.copy(popularLoadFailed = false) }
