@@ -12,3 +12,7 @@ local.properties
 # Config de Firebase: local, nunca al repo
 google-services.json
 app/google-services.json
+
+# Llaves de firma: el repo es público, nunca deben viajar a GitHub.
+*.jks
+*.keystore
