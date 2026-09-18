@@ -89,8 +89,11 @@ private val SizeFactor: Float = run {
     val maxCardHeight = ScreenHeightDp * 0.55f / (1f + 0.22f)
     ((maxCardHeight - 70f) / (207f * PhotoExtra)).coerceIn(1f, 1.3f)
 }
-private val CardWidth = (160f * SizeFactor).dp
 private val PhotoHeight = (207f * PhotoExtra * SizeFactor).dp
+/** El ancho sale del alto de la foto en 3:4 (foto vertical de teléfono). Con el
+ *  ancho fijo en 160 mientras el alto crecía, la foto quedaba casi 1:2: una
+ *  tira delgada que recortaba la imagen original. Espejo del arreglo de iOS. */
+private val CardWidth = PhotoHeight * 3f / 4f
 /** La banda de texto mide 70: 7 de aire arriba, 8 (categoría) + 3 + 20 (nombre)
  *  + 3 + 20 (autor) = 54, y 7 abajo. */
 private val CardHeight = PhotoHeight + 70.dp
