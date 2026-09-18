@@ -110,6 +110,9 @@ fun BuddyRoot() {
 
     // Mapa del trip → pantalla completa sin tab bar (como TripDetailView, iOS)
     mapJourney?.let { journey ->
+        // Mapa: el arrastre del borde lo haría el mapa (se desplaza con el
+        // dedo), así que aquí solo el volver del sistema — no lo tenía.
+        androidx.activity.compose.BackHandler { mapJourney = null; mapSpotId = null }
         com.buddy.app.features.trips.map.TripMapScreen(
             journey = journey,
             initialSpotId = mapSpotId,
@@ -140,20 +143,24 @@ fun BuddyRoot() {
     // systemBarsPadding: el overlay vive fuera del Scaffold, sin él el header
     // queda bajo la barra de estado y el input bajo la barra de gestos.
     if (openChatId != null) {
-        ChatScreen(
-            matchId = openChatId!!,
-            title = "Chat",
-            initialCategory = openChatCategory,
-            onBack = {
-                openChatId = null; openChatCategory = null
-                conexionesVm.load()
-                homeVm.refreshTripState()
-                // La fila "¿Una duda en X?" de Tu trip depende del match — si el
-                // usuario cerró la ayuda dentro del chat, hay que recargarla.
-                tripsVm.load()
-            },
-            modifier = Modifier.systemBarsPadding(),
-        )
+        val cerrarChat = {
+            openChatId = null; openChatCategory = null
+            conexionesVm.load()
+            homeVm.refreshTripState()
+            // La fila "¿Una duda en X?" de Tu trip depende del match — si el
+            // usuario cerró la ayuda dentro del chat, hay que recargarla.
+            tripsVm.load()
+        }
+        // Jalar a la derecha (o el volver del sistema) cierra el chat.
+        com.buddy.app.core.designsystem.components.SwipeBackScreen(onBack = cerrarChat) {
+            ChatScreen(
+                matchId = openChatId!!,
+                title = "Chat",
+                initialCategory = openChatCategory,
+                onBack = cerrarChat,
+                modifier = Modifier.systemBarsPadding(),
+            )
+        }
         return
     }
 
@@ -301,7 +308,7 @@ fun BuddyRoot() {
             // Mi propio perfil se muestra como la pantalla del tab Yo, que no
             // trae flecha de volver: sin esto, el botón del sistema saldría de
             // la app en vez de cerrar la capa.
-            androidx.activity.compose.BackHandler { perfilAbierto = null }
+            com.buddy.app.core.designsystem.components.SwipeBackScreen(onBack = { perfilAbierto = null }) {
             com.buddy.app.features.profile.UserProfileScreen(
                 travelerId = id,
                 previewName = nombre,
@@ -310,6 +317,7 @@ fun BuddyRoot() {
                 onOpenTrips = { perfilAbierto = null; selectedTab = AppTab.Trips },
                 vm = androidx.hilt.navigation.compose.hiltViewModel(key = id),
             )
+            }
         }
     }
     }

@@ -87,13 +87,15 @@ fun ConexionesScreen(
 
     val openItem = state.connections.firstOrNull { it.id == openMatchId }
     if (openMatchId != null) {
-        BackHandler { openMatchId = null; viewModel.load() }
-        ChatScreen(
-            matchId = openMatchId!!,
-            title = openItem?.displayName ?: "Chat",
-            onBack = { openMatchId = null; viewModel.load() },
-            modifier = modifier,
-        )
+        val cerrarChat = { openMatchId = null; viewModel.load() }
+        // Jalar a la derecha (o el volver del sistema) cierra el chat.
+        com.buddy.app.core.designsystem.components.SwipeBackScreen(onBack = cerrarChat, modifier = modifier) {
+            ChatScreen(
+                matchId = openMatchId!!,
+                title = openItem?.displayName ?: "Chat",
+                onBack = cerrarChat,
+            )
+        }
         return
     }
 

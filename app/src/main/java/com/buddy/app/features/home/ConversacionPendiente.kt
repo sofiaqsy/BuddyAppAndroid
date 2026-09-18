@@ -334,19 +334,25 @@ fun ConversacionPendienteHost(
     val emparejado = searchState as? com.buddy.app.features.matching.MatchingViewModel.SearchState.Matched
     if (emparejado != null) {
         // Un buddy aceptó: la misma pantalla pasa a ser el chat.
-        com.buddy.app.features.messages.ChatScreen(
-            matchId = emparejado.matchId,
-            title = emparejado.buddy?.fullName?.split(" ")?.firstOrNull() ?: "Chat",
-            initialCategory = emparejado.category,
-            onBack = {
-                matchingVm.dismiss()
-                categoriaElegida = null
-                onClose()
-                homeVm.refreshTripState()
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
+        val cerrarChat = {
+            matchingVm.dismiss()
+            categoriaElegida = null
+            onClose()
+            homeVm.refreshTripState()
+        }
+        com.buddy.app.core.designsystem.components.SwipeBackScreen(onBack = cerrarChat) {
+            com.buddy.app.features.messages.ChatScreen(
+                matchId = emparejado.matchId,
+                title = emparejado.buddy?.fullName?.split(" ")?.firstOrNull() ?: "Chat",
+                initialCategory = emparejado.category,
+                onBack = cerrarChat,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
     } else {
+        // La consulta antes de que llegue un buddy: jalar a la derecha (o el
+        // volver del sistema) la cierra, igual que el botón de volver.
+        com.buddy.app.core.designsystem.components.SwipeBackScreen(onBack = { cerrar() }) {
         ConversacionPendiente(
             destinationName = state.destinationName,
             // El tema sale del estado de búsqueda cuando existe: así sobrevive
@@ -358,5 +364,6 @@ fun ConversacionPendienteHost(
             onBack = { cerrar() },
             modifier = Modifier.fillMaxSize(),
         )
+        }
     }
 }
