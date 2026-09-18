@@ -29,9 +29,10 @@ android {
         // (comunidad viva, perfiles, mapa con ficha de lugar, compartir). Que el
         // número diga lo mismo en los dos lados es lo que permite responder "¿en
         // qué versión estás?" sin traducir. Android nunca publicó una 1.0.3.
-        // 6 y no 5: la 5 pudo haberse subido ya, y Play solo exige que el número
-        // suba. Primera versión firmada con la upload key nueva (2026-09).
-        versionCode = 6
+        // 7: la 6 salió antes de los arreglos de subida de fotos
+        // (client_page_id), "Pendiente de aprobación" y la foto de cámara en
+        // Android 8. Firmada con la upload key nueva (2026-09).
+        versionCode = 7
         versionName = "1.1.0"
 
         buildConfigField("String", "API_BASE_URL", "\"https://buddy-core-504b393f8333.herokuapp.com/v1/\"")

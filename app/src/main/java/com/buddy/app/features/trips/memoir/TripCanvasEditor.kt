@@ -188,11 +188,21 @@ fun TripCanvasEditor(
         val uri = cameraUri
         if (ok && uri != null) {
             scope.launch {
+                // Mismo camino que la galería: ImageDecoder solo existe desde
+                // Android 9 (API 28) y minSdk es 26 — en Android 8 la foto de la
+                // cámara fallaba en silencio. Y el tope de tamaño: una foto de
+                // cámara a resolución completa podía agotar la memoria del editor.
                 val bmp = withContext(Dispatchers.IO) {
                     runCatching {
-                        ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { d, _, _ ->
-                            d.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                        val raw = if (Build.VERSION.SDK_INT >= 28) {
+                            ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, uri)) { d, _, _ ->
+                                d.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                            }
+                        } else {
+                            @Suppress("DEPRECATION")
+                            android.provider.MediaStore.Images.Media.getBitmap(context.contentResolver, uri)
                         }
+                        BitmapEffects.limitedToMaxDimension(raw, CanvasState.MAX_IMAGE_PX)
                     }.getOrNull()
                 }
                 if (bmp != null) canvas.addPhoto(bmp)
