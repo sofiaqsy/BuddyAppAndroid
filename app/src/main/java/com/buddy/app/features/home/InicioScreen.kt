@@ -156,13 +156,17 @@ fun InicioScreen(
     // mudó a ConversacionPendienteHost: ahora la dispara el tema que se elige
     // DENTRO de la conversación, y esa vive fuera de esta pantalla.
 
+    // Logo fijo arriba y el contenido desplazándose debajo, como la barra de
+    // navegación de iOS.
+    Column(modifier.fillMaxSize().background(BuddyColor.Canvas)) {
+    com.buddy.app.core.designsystem.components.BuddyLogoHeader()
     Column(
-        modifier.fillMaxSize().background(BuddyColor.Canvas)
+        Modifier.weight(1f).fillMaxWidth()
             // Mientras se hace pinch sobre una foto del carrusel, la pantalla
             // queda quieta (igual que iOS con scrollDisabled).
             .verticalScroll(rememberScrollState(), enabled = !CarouselZoom.isZooming),
     ) {
-        Spacer(Modifier.height(Spacing.md))
+        Spacer(Modifier.height(Spacing.sm))
 
         if (state.loadFailed) RetryRow(onRetry = { viewModel.load(force = true) })
 
@@ -330,6 +334,7 @@ fun InicioScreen(
 
         // "Historias de viajeros" se mudó al tab Trips, debajo del trip propio.
         Spacer(Modifier.height(100.dp))
+    }
     }
 
     MatchingSheet(searchState, matchingViewModel, onOpenChat, onOpenConexiones)

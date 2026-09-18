@@ -91,7 +91,7 @@ private val SizeFactor: Float = run {
 }
 /** ×1.3 y luego −10% (espejo de iOS). El ancho acompaña solo, porque sale de
  *  este alto. */
-private const val CardBoost = 1.3f * 0.9f
+private const val CardBoost = 1.3f * 0.9f * 1.05f
 private val PhotoHeight = (207f * PhotoExtra * SizeFactor * CardBoost).dp
 /** El ancho sale del alto de la foto en 3:4 (foto vertical de teléfono). Con el
  *  ancho fijo en 160 mientras el alto crecía, la foto quedaba casi 1:2: una

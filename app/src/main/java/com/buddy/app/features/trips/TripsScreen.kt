@@ -184,12 +184,14 @@ fun TripsScreen(
         if (scrollToTopToken > 0) scrollState.animateScrollTo(0)
     }
 
+    // Logo fijo arriba (como iOS); sin título de sección —ni "TU BITÁCORA" ni
+    // "Tu trip."—. Las acciones del trip viven dentro de su tarjeta.
+    Column(modifier.fillMaxSize().background(BuddyColor.Canvas)) {
+    com.buddy.app.core.designsystem.components.BuddyLogoHeader()
     Column(
-        modifier.fillMaxSize().background(BuddyColor.Canvas).verticalScroll(scrollState),
+        Modifier.weight(1f).fillMaxWidth().verticalScroll(scrollState),
     ) {
-        // Sin cabecera (iOS la quitó: ni "TU BITÁCORA" ni "Tu trip."). Las
-        // acciones del trip viven dentro de su tarjeta.
-        Spacer(Modifier.height(Spacing.md))
+        Spacer(Modifier.height(Spacing.sm))
 
         // ── Selector horizontal — solo con más de un trip ──────────────────
         if (state.visibleTrips.size > 1) {
@@ -265,6 +267,7 @@ fun TripsScreen(
         )
 
         Spacer(Modifier.height(100.dp))
+    }
     }
 
     if (state.showShareLugarSheet) {
