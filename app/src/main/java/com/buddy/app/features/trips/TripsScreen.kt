@@ -238,16 +238,8 @@ fun TripsScreen(
             else -> EmptyTripsState(onRegister = viewModel::openRegister)
         }
 
-        if (isApprovedBuddy) {
-            Spacer(Modifier.height(Spacing.md))
-            CompartirLugarCard(
-                onTap = {
-                    shareLugarStep = ShareLugarStep.Choose
-                    viewModel.openShareLugar()
-                },
-                modifier = Modifier.padding(horizontal = Spacing.edge),
-            )
-        }
+        // Sin la tarjeta "¿ERES BUDDY? Compartir un lugar": iOS no la muestra en
+        // Trips. Recomendar un lugar sigue disponible desde el perfil y el mapa.
 
         // Historias de otros viajeros, después de lo propio (el trip en curso
         // o la invitación a registrar uno).
