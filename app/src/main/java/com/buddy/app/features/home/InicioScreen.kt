@@ -219,8 +219,16 @@ fun InicioScreen(
             // El trip seleccionado ES el que tiene el match activo — con 2+
             // trips vivos, uno puede no tener buddy asignado (ej: Villa Rica
             // en "planning" mientras San Francisco tiene el match).
-            val selectedIsActiveTrip = effectiveContext is HomeContext.Trip &&
-                effectiveContext.journeyId == state.activeJourney?.id
+            //
+            // Con el Home siguiendo al GPS (CurrentLocation) no hay trip
+            // "seleccionado", y exigirlo escondía al buddy asignado: el match
+            // existía pero su nombre no aparecía. iOS lo muestra en los dos
+            // contextos; aquí igual.
+            val selectedIsActiveTrip = when (effectiveContext) {
+                is HomeContext.Trip -> effectiveContext.journeyId == state.activeJourney?.id
+                HomeContext.CurrentLocation -> true
+                null -> false
+            }
             // true cuando algo se pinta ARRIBA de CategoryPicker (el selector,
             // o LocationContext en Case 4). CategoryPicker ya trae su propio
             // Spacer(Spacing.md) antes del heading — sin esta bandera, el

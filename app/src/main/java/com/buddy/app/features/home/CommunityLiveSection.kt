@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.SpanStyle
@@ -198,7 +199,7 @@ private fun fila(
                 // La frase entera y no solo el nombre: va concatenada con la
                 // acción en un mismo Text para que fluya y parta de línea sola,
                 // y dentro de un Text no se puede hacer tocable un tramo.
-                modifier = gestoPersona,
+                modifier = gestoPersona.redactado(esEsqueleto),
             )
 
             // Hora y lugar en extremos opuestos: la fila cierra tocando ambos
@@ -210,7 +211,8 @@ private fun fila(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(formatTimeAgo(item.at), style = BuddyType.Caption2,
-                     color = BuddyColor.InkMuted, maxLines = 1)
+                     color = BuddyColor.InkMuted, maxLines = 1,
+                     modifier = Modifier.redactado(esEsqueleto))
                 Spacer(Modifier.weight(1f))
                 // El lugar lleva al mapa, igual que el nombre del destino en
                 // las historias: el gesto ya está aprendido ahí y responde la
@@ -231,7 +233,7 @@ private fun fila(
                             interactionSource = remember { MutableInteractionSource() },
                             onClick = onTocarLugar,
                         )
-                    } else Modifier,
+                    } else Modifier.redactado(esEsqueleto),
                 )
             }
         }
@@ -264,3 +266,15 @@ private fun accionDe(category: String?): String = when (category) {
     "city_tour" -> "acompañó por la ciudad"
     else -> "ayudó a un viajero"
 }
+
+
+/** Esqueleto: en vez del texto de relleno ("Nombre", "Ciudad") dibuja una barra
+ *  gris del mismo tamaño. Sin esto la fila de carga se leía como datos reales
+ *  ("Nombre ayudó a un viajero · Ciudad"). Espejo del .redacted de iOS. */
+private fun Modifier.redactado(activo: Boolean): Modifier =
+    if (!activo) this else this.drawWithContent {
+        drawRoundRect(
+            color = BuddyColor.SurfaceRaised,
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx()),
+        )
+    }
