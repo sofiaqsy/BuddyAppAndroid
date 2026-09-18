@@ -166,6 +166,9 @@ fun CompartirLugarSheet(
                         value = query,
                         onValueChange = { query = it; onQueryChange(it) },
                         placeholder = "Buscar en tus lugares",
+                        // Todo el ancho: sin esto el campo quedaba en el
+                        // ancho mínimo de Material, la mitad de la pantalla.
+                        modifier = Modifier.fillMaxWidth(),
                     )
                     Spacer(Modifier.height(Spacing.sm))
 
@@ -238,6 +241,9 @@ fun CompartirLugarSheet(
                         value = nombre,
                         onValueChange = { nombre = it },
                         placeholder = "Ej. Cafetería Rosal",
+                        // Todo el ancho: sin esto el campo quedaba en el
+                        // ancho mínimo de Material, la mitad de la pantalla.
+                        modifier = Modifier.fillMaxWidth(),
                     )
 
                     // La categoría la elige quien está viendo el local, así la
