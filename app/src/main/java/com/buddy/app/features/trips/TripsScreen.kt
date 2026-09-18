@@ -228,12 +228,10 @@ fun TripsScreen(
                 },
                 isPublishing = isPublishing,
                 onBuddyTap = onOpenConexiones,
+                // El menú ⋯ al final de la cabecera de la tarjeta, en fila con
+                // el resto: flotando encima se montaba sobre "Desde hoy".
+                headerTrailing = { TripActionsMenu(onCancelTrip = { showCancelConfirm = true }) },
               )
-              // El menú ⋯ dentro de la tarjeta, arriba a la derecha: sin
-              // cabecera no hay otro sitio donde colgarlo.
-              Box(Modifier.align(Alignment.TopEnd).padding(4.dp)) {
-                  TripActionsMenu(onCancelTrip = { showCancelConfirm = true })
-              }
             }
             else -> EmptyTripsState(onRegister = viewModel::openRegister)
         }
@@ -424,7 +422,7 @@ fun TripsScreen(
 private fun TripActionsMenu(onCancelTrip: () -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        IconButton(onClick = { expanded = true }) {
+        IconButton(onClick = { expanded = true }, modifier = Modifier.size(36.dp)) {
             Icon(Icons.Filled.MoreHoriz, contentDescription = "Acciones del trip", tint = BuddyColor.Ink)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {

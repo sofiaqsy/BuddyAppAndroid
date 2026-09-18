@@ -84,6 +84,10 @@ fun TripFeedCard(
     /** Tap en "Publicar esta historia" — el gate de login vive en el caller. */
     onPublishTap: (() -> Unit)? = null,
     isPublishing: Boolean = false,
+    /** Acciones al final de la cabecera (el menú ⋯ del trip). Van DENTRO de la
+     *  fila, después del estado: como overlay flotante se montaban sobre
+     *  "Desde hoy". */
+    headerTrailing: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val destName = journey.destination?.name ?: journey.title ?: "Trip"
@@ -220,6 +224,7 @@ fun TripFeedCard(
                 }
             }
             StatusBadge(journey)
+            headerTrailing?.invoke()
         }
 
         // ── Canvas de momentos ────────────────────────────────────────────
