@@ -65,6 +65,8 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -241,6 +243,14 @@ fun InicioScreen(
                 )
             }
             CategoryPicker(
+                onDestinationTap = state.destinationId?.let { destId ->
+                    {
+                        val nombre = state.destinationName ?: ""
+                        onOpenPlace(ApiPlaceCard(id = destId, name = nombre,
+                                                 destinationId = destId,
+                                                 destinationName = nombre))
+                    }
+                },
                 destinationName = state.destinationName,
                 communityContext = state.communityContext,
                 activeBuddyName = if (selectedIsActiveTrip) state.activeBuddyName else null,
@@ -431,6 +441,9 @@ private fun CategoryPicker(
     onOpenPlace: (ApiPlaceCard) -> Unit,
     onOpenBuddyChat: () -> Unit,
     onStartConversation: () -> Unit,
+    /** Tocar el nombre del lugar abre su mapa — espejo de onDestinationTap
+     *  (iOS). Nulo cuando no hay destino resuelto: sin guía no hay gesto. */
+    onDestinationTap: (() -> Unit)? = null,
 ) {
     val noBuddies = activeBuddyName == null &&
         (communityContext?.let { it.buddies <= 0 && it.totalBuddies <= 0 } ?: true)
@@ -462,7 +475,26 @@ private fun CategoryPicker(
                     // El núcleo es la CERCANÍA; la ciudad queda como referencia.
                     withStyle(SpanStyle(color = BuddyColor.InkMuted)) {
                         append("Lugares cerca de ti que recomiendan los buddies")
-                        if (destinationName != null) append(" · $destinationName") else append(".")
+                        if (destinationName == null) append(".") else append(" · ")
+                    }
+                    if (destinationName != null) {
+                        // El nombre del lugar, subrayado, abre su mapa (iOS igual).
+                        val tap = onDestinationTap
+                        if (tap != null) {
+                            withLink(
+                                androidx.compose.ui.text.LinkAnnotation.Clickable(
+                                    tag = "destino",
+                                    styles = androidx.compose.ui.text.TextLinkStyles(
+                                        style = SpanStyle(
+                                            color = BuddyColor.InkMuted,
+                                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                                        ),
+                                    ),
+                                ) { tap() },
+                            ) { append(destinationName) }
+                        } else {
+                            withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append(destinationName) }
+                        }
                     }
                 } else {
                     withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append("Elige el tema de tu consulta. Te conectaremos con una persona que conozca") }
@@ -519,11 +551,26 @@ private fun CategoryPicker(
             // La bisagra entre las fotos y el CTA: nombra la ciudad y la
             // disponibilidad en la misma frase, para encadenar lugar → persona
             // → consulta.
-            Text(
-                exploreAvailabilityText(communityContext, destinationName),
-                style = BuddyType.Caption1,
-                color = BuddyColor.InkMuted,
-            )
+            // Centrada bajo la tarjeta del medio, con el punto de "en línea":
+            // se lee como el estado de la comunidad, no como una nota al pie.
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(if ((communityContext?.buddies ?: 0) > 0) BuddyColor.Accent else BuddyColor.InkFaint),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    exploreAvailabilityText(communityContext, destinationName),
+                    style = BuddyType.Footnote,
+                    color = BuddyColor.Ink,
+                )
+            }
             Spacer(Modifier.height(16.dp))
         }
 
