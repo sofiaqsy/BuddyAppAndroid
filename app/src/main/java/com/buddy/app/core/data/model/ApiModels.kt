@@ -99,8 +99,11 @@ data class ApiJourney(
 @Serializable
 data class FeedPage(
     val items: List<ApiJourney>,
-    @SerialName("next_cursor") val nextCursor: String? = null,
-    @SerialName("has_more") val hasMore: Boolean = false,
+    // camelCase: así lo manda buddy-core (feed.js y users.js responden
+    // { items, nextCursor, hasMore }). Con next_cursor/has_more la clave nunca
+    // coincidía, hasMore quedaba en false y ninguna lista paginaba nunca.
+    @SerialName("nextCursor") val nextCursor: String? = null,
+    @SerialName("hasMore") val hasMore: Boolean = false,
 )
 
 // MARK: – Matching & Help Requests

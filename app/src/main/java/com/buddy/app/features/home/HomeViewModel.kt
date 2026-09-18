@@ -255,7 +255,8 @@ class HomeViewModel @Inject constructor(
                 refreshCommunityContext()
                 loadCommunityLive()  // Cargar comunidad viva en paralelo
                 refreshOpenRequest()
-                loadFeed()
+                // Las historias se fueron al tab Trips (TravelerStoriesSection):
+                // el Home ya no las pide.
                 lastLoadAt = System.currentTimeMillis()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e

@@ -67,6 +67,9 @@ fun BuddyRoot() {
     var perfilAbierto by androidx.compose.runtime.remember {
         mutableStateOf<Triple<String, String?, String?>?>(null)
     }
+    /** Sube con cada re-tap del tab Trips: la pantalla vuelve arriba y
+     *  recarga las historias. */
+    var tripsScrollToTop by androidx.compose.runtime.remember { mutableStateOf(0) }
 
     // Mismo ViewModel (scope de Activity) que usa el tab Conexiones —
     // el badge refleja chatStore.totalUnread como en iOS.
@@ -158,7 +161,7 @@ fun BuddyRoot() {
                 selected = selectedTab,
                 unreadChats = conexionesState.totalUnread,
                 onSelect = { selectedTab = it },
-                onReselect = { /* scroll-to-top / reload — se conecta en Fase 4 */ },
+                onReselect = { tab -> if (tab == AppTab.Trips) tripsScrollToTop++ },
             )
         },
     ) { padding ->
@@ -232,6 +235,8 @@ fun BuddyRoot() {
                 onOpenMap = { mapJourney = it; mapSpotId = null },
                 onPublished = { selectedTab = AppTab.Inicio },
                 isApprovedBuddy = conexionesState.isApprovedBuddy,
+                onOpenProfile = { id, nombre, avatar -> perfilAbierto = Triple(id, nombre, avatar) },
+                scrollToTopToken = tripsScrollToTop,
             )
             AppTab.Conexiones -> ConexionesScreen(modifier, onOpenTrips = { selectedTab = AppTab.Trips })
             AppTab.Yo -> YoScreen(

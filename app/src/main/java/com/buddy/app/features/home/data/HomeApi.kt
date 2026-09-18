@@ -45,6 +45,7 @@ interface HomeApi {
         @Query("limit") limit: Int = 10,
         @Query("lat") lat: Double? = null,
         @Query("lng") lng: Double? = null,
+        @Query("cursor") cursor: String? = null,
     ): FeedPage
 
     @GET("travelers/me/journeys")

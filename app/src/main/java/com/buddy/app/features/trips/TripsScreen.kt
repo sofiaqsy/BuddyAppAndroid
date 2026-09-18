@@ -86,6 +86,10 @@ fun TripsScreen(
     /** Fase 2 "Buddy Community Places" — mismo flag que ya gatea "Oportunidades
      *  para ayudar" en Conexiones (BuddyNavHost lo pasa desde conexionesState). */
     isApprovedBuddy: Boolean = false,
+    /** La cara y el nombre del autor de una historia abren su perfil. */
+    onOpenProfile: (travelerId: String, name: String?, avatarUrl: String?) -> Unit = { _, _, _ -> },
+    /** Sube con el re-tap del tab: vuelve arriba (espejo de .tabReselected). */
+    scrollToTopToken: Int = 0,
     viewModel: TripsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -173,33 +177,19 @@ fun TripsScreen(
         return
     }
 
+    val scrollState = rememberScrollState()
+    // Re-tap del tab: arriba. Se salta el valor inicial para no mover el
+    // scroll al volver al tab, solo al tocarlo estando ya en él.
+    androidx.compose.runtime.LaunchedEffect(scrollToTopToken) {
+        if (scrollToTopToken > 0) scrollState.animateScrollTo(0)
+    }
+
     Column(
-        modifier.fillMaxSize().background(BuddyColor.Canvas).verticalScroll(rememberScrollState()),
+        modifier.fillMaxSize().background(BuddyColor.Canvas).verticalScroll(scrollState),
     ) {
-        // ── Header — título + acciones del trip seleccionado ──────────────
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = Spacing.edge, vertical = Spacing.md),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "TU BITÁCORA",
-                    style = BuddyType.Eyebrow.copy(letterSpacing = 2.sp),
-                    color = BuddyColor.InkMuted,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    buildAnnotatedString {
-                        withStyle(SpanStyle(color = BuddyColor.Ink)) { append("Tu ") }
-                        withStyle(SpanStyle(color = BuddyColor.Brand)) { append("trip.") }
-                    },
-                    style = BuddyType.Title1,
-                )
-            }
-            if (state.selectedTrip != null) {
-                TripActionsMenu(onCancelTrip = { showCancelConfirm = true })
-            }
-        }
+        // Sin cabecera (iOS la quitó: ni "TU BITÁCORA" ni "Tu trip."). Las
+        // acciones del trip viven dentro de su tarjeta.
+        Spacer(Modifier.height(Spacing.md))
 
         // ── Selector horizontal — solo con más de un trip ──────────────────
         if (state.visibleTrips.size > 1) {
@@ -222,7 +212,8 @@ fun TripsScreen(
         // ── Contenido según estado del trip seleccionado ───────────────────
         when {
             state.isLoading -> BuddyLoading(Modifier.height(480.dp))
-            state.selectedTrip != null -> TripFeedCard(
+            state.selectedTrip != null -> Box(Modifier.padding(horizontal = Spacing.edge)) {
+              TripFeedCard(
                 journey = state.selectedTrip!!,
                 buddyName = state.activeBuddyName,
                 buddyAvatarUrl = state.activeBuddyAvatarUrl,
@@ -235,8 +226,13 @@ fun TripsScreen(
                 },
                 isPublishing = isPublishing,
                 onBuddyTap = onOpenConexiones,
-                modifier = Modifier.padding(horizontal = Spacing.edge),
-            )
+              )
+              // El menú ⋯ dentro de la tarjeta, arriba a la derecha: sin
+              // cabecera no hay otro sitio donde colgarlo.
+              Box(Modifier.align(Alignment.TopEnd).padding(4.dp)) {
+                  TripActionsMenu(onCancelTrip = { showCancelConfirm = true })
+              }
+            }
             else -> EmptyTripsState(onRegister = viewModel::openRegister)
         }
 
@@ -250,6 +246,23 @@ fun TripsScreen(
                 modifier = Modifier.padding(horizontal = Spacing.edge),
             )
         }
+
+        // Historias de otros viajeros, después de lo propio (el trip en curso
+        // o la invitación a registrar uno).
+        Spacer(Modifier.height(Spacing.xl))
+        TravelerStoriesSection(
+            reloadToken = scrollToTopToken,
+            scrollState = scrollState,
+            onOpenProfile = onOpenProfile,
+            onOpenDestination = { destinationId, nombre ->
+                onOpenPlace(
+                    com.buddy.app.core.data.model.ApiPlaceCard(
+                        id = destinationId, name = nombre,
+                        destinationId = destinationId, destinationName = nombre,
+                    ),
+                )
+            },
+        )
 
         Spacer(Modifier.height(100.dp))
     }
@@ -465,7 +478,7 @@ private fun TripSelectorCard(
     }
 }
 
-/** Empty state — icono mapa, copy exacta y botón cápsula ink "＋ Registrar trip". */
+/** Empty state — sin icono, copy exacta y botón cápsula ink "＋ Registrar trip". */
 @Composable
 private fun EmptyTripsState(onRegister: () -> Unit) {
     Column(
@@ -473,10 +486,9 @@ private fun EmptyTripsState(onRegister: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
-        Icon(Icons.Filled.Map, contentDescription = null, Modifier.size(40.dp), tint = BuddyColor.InkMuted)
         Text("Tu próximo trip te espera", style = BuddyType.Title3, color = BuddyColor.Ink)
         Text(
-            "Registra tu próximo destino\ny conecta con un buddy.",
+            "Registra tu próximo destino\ny comparte tu trip.",
             style = BuddyType.Callout,
             color = BuddyColor.InkMuted,
             textAlign = TextAlign.Center,

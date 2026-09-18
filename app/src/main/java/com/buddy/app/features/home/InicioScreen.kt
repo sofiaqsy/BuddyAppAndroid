@@ -325,19 +325,7 @@ fun InicioScreen(
             modifier = Modifier.padding(bottom = Spacing.lg),
         )
 
-        Spacer(Modifier.height(7.dp))
-        CommunitySection(
-            stories = state.stories,
-            isLoading = state.isLoadingFeed,
-            failed = state.feedFailed,
-            onRetry = viewModel::loadFeed,
-            onOpenProfile = onOpenProfile,
-            onOpenDestination = { destinationId, nombre ->
-                onOpenPlace(ApiPlaceCard(id = destinationId, name = nombre,
-                                         destinationId = destinationId,
-                                         destinationName = nombre))
-            },
-        )
+        // "Historias de viajeros" se mudó al tab Trips, debajo del trip propio.
         Spacer(Modifier.height(100.dp))
     }
 
@@ -648,7 +636,7 @@ private fun CommunitySection(
 
 /** Espejo de PublishedTripCard (iOS): carrusel con scrim, nombre, dots, footer. */
 @Composable
-private fun PublishedTripCard(
+internal fun PublishedTripCard(
     story: ApiJourney,
     /** La cara y el nombre llevan al perfil del autor; el resto del pie sigue
      *  abriendo la historia. Mismo reparto que en Comunidad viva: quien toca a
