@@ -18,7 +18,7 @@ class BuddyFirebaseMessagingService : FirebaseMessagingService() {
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        Log.d(TAG, "New FCM token: $token")
+        Log.d(TAG, "New FCM token (…${token.takeLast(4)})")
         // Save token locally
         saveToken(token)
     }

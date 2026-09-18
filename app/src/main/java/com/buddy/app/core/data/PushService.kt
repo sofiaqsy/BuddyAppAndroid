@@ -40,7 +40,9 @@ class PushService @Inject constructor(
         // Request fresh token from Firebase
         try {
             val token = FirebaseMessaging.getInstance().token.await()
-            Log.d(TAG, "Got FCM token: $token")
+            // El token entero no va al log: identifica al dispositivo y sirve para
+            // mandarle notificaciones. Los últimos cuatro bastan para distinguirlo.
+            Log.d(TAG, "Got FCM token (…${token.takeLast(4)})")
             registerTokenWithBackend(token)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get FCM token", e)
