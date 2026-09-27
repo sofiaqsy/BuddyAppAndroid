@@ -32,8 +32,9 @@ android {
         // 7: la 6 salió antes de los arreglos de subida de fotos
         // (client_page_id), "Pendiente de aprobación" y la foto de cámara en
         // Android 8. Firmada con la upload key nueva (2026-09).
-        versionCode = 7
-        versionName = "1.1.0"
+        // 8: velocidad de Home (bootstrap + cache) — espejo de iOS 1.1.1.
+        versionCode = 8
+        versionName = "1.1.1"
 
         buildConfigField("String", "API_BASE_URL", "\"https://buddy-core-504b393f8333.herokuapp.com/v1/\"")
         // Dominio público de los enlaces que se comparten fuera de la app. NO es
