@@ -26,6 +26,7 @@ import javax.inject.Singleton
 class TravelerRepository @Inject constructor(
     private val api: AuthApi,
     private val store: SessionStore,
+    private val journeysStore: com.buddy.app.core.data.store.JourneysStore,
 ) {
     private val mutex = Mutex()
 
@@ -124,6 +125,21 @@ class TravelerRepository @Inject constructor(
      * sigue vigente, otra petición ya lo renovó: se reutiliza sin ir a la red.
      * Mismo arreglo que el RefreshCoalescer de iOS.
      */
+    /**
+     * Renueva el JWT ANTES de mandar una petición si ya venció o vence en
+     * menos de 5 min (jwtExpiresSoon) — espejo de refreshTokenIfExpiring
+     * (iOS). Lo llama AuthInterceptor para cada request. Sin esto, tras un
+     * rato con la app abierta todas las peticiones del Home salían con el
+     * token viejo, recibían 401 a la vez y se repetían tras el refresh.
+     * Nunca lanza: si falla, la petición sale igual y el 401 reactivo del
+     * interceptor sigue siendo la red de seguridad.
+     */
+    suspend fun refreshTokenIfExpiring() {
+        val token = store.current()?.token
+        if (token.isNullOrEmpty() || !jwtExpiresSoon(token)) return
+        runCatching { refreshNow(failedToken = token) }
+    }
+
     suspend fun refreshNow(failedToken: String? = null): String? = mutex.withLock {
         val current = store.current() ?: return null
         val actual = current.token
@@ -153,7 +169,10 @@ class TravelerRepository @Inject constructor(
         }
     }
 
-    suspend fun clearSession() = store.clear()
+    suspend fun clearSession() {
+        store.clear()
+        journeysStore.clear()
+    }
 
     companion object { private const val TAG = "TravelerRepo" }
 }

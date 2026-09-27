@@ -54,6 +54,7 @@ class HomeViewModel @Inject constructor(
     private val sse: com.buddy.app.core.network.SseClient,
     private val spotsRepo: SpotsRepository,
     private val journeysStore: com.buddy.app.core.data.store.JourneysStore,
+    private val homeBootstrap: com.buddy.app.core.data.store.HomeBootstrapStore,
 ) : ViewModel() {
 
     data class HomeState(
@@ -172,9 +173,15 @@ class HomeViewModel @Inject constructor(
                     Log.d(TAG, "📡 [gps] descartado ±${fix.accuracy?.toInt()}m (umbral ${LocationFilter.MAX_ACCURACY_M.toInt()}m)")
                     return@collect
                 }
+                val esPrimerFix = !hasStable
                 hasStable = true
                 _state.update { it.copy(stableLat = fix.lat, stableLng = fix.lng, userLat = fix.lat, userLng = fix.lng) }
                 spotsRepo.reorder(fix.lat, fix.lng)
+
+                // Primer fix del GPS → dispara /home/bootstrap (espejo de
+                // HomeBootstrap.preparar en InicioView). No se espera aquí:
+                // journeys/matches/placeShares lo recogen solos cuando lo pidan.
+                if (esPrimerFix) homeBootstrap.preparar(fix.lat, fix.lng)
 
                 val prevLat = lastQueryLat
                 val prevLng = lastQueryLng
@@ -248,6 +255,7 @@ class HomeViewModel @Inject constructor(
         _state.update { it.copy(isLoading = true, loadFailed = false) }
         loadJob = viewModelScope.launch {
             try {
+                seedFromDisk()
                 travelerRepo.ensureSession()
                 loadTripAndMatch()
                 // Con permiso los spots los pide el primer fix, con coordenadas.
@@ -301,6 +309,24 @@ class HomeViewModel @Inject constructor(
     fun onPermissionResult(granted: Boolean) {
         if (granted) { load(); trackLocation() }
         else _state.update { it.copy(isLoading = false, needsLocationPermission = true) }
+    }
+
+    /**
+     * "Pista viaje" instantánea en un arranque frío: pinta liveJourneys desde
+     * el cache en disco ANTES de que responda cualquier red. loadTripAndMatch
+     * la corrige (o la confirma) en cuanto llega /travelers/me/journeys.
+     * Espejo del bloque JourneysStore.shared.desdeDisco() en InicioView.
+     */
+    private suspend fun seedFromDisk() {
+        val previos = runCatching { journeysStore.desdeDisco() }.getOrNull()
+            ?.filter { it.tripId != null } ?: return
+        if (previos.isEmpty()) return
+        val active = previos.firstOrNull { it.status == "active" } ?: previos.firstOrNull { it.status == "planning" }
+        val live = previos.filter { it.status == "active" || it.status == "planning" }
+            .sortedBy { if (it.status == "active") 0 else 1 }
+        if (live.isEmpty()) return
+        Log.d(TAG, "🗂️ [journeys] pista viaje desde disco — ${live.size} vivo(s)")
+        _state.update { it.copy(activeJourney = active, liveJourneys = live) }
     }
 
     /** Espejo de loadData + activeMatch (iOS). */

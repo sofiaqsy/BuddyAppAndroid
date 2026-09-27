@@ -156,7 +156,27 @@ interface HomeApi {
     /** GET /community/pulse — pulso global cuando no hay actividad local. */
     @GET("community/pulse")
     suspend fun communityPulse(): ApiPulseResponse
+
+    /**
+     * GET /home/bootstrap — un solo viaje de red para lo que el Home necesita
+     * al arrancar (journeys, matches, destinations, placeShares, myOffers,
+     * forBuddy, myRequest, recentHelpNearby, recentHelp:<destinationId>).
+     * La decodifica HomeBootstrapStore, que reparte cada parte a quien la
+     * pida — no se usa directo desde ningún ViewModel.
+     */
+    @GET("home/bootstrap")
+    suspend fun bootstrap(
+        @Query("lat") lat: Double? = null,
+        @Query("lng") lng: Double? = null,
+        @Query("radius_km") radiusKm: Int = 15,
+    ): HomeBootstrapEnvelope
 }
+
+@Serializable
+data class HomeBootstrapEnvelope(
+    val ts: String? = null,
+    val parts: Map<String, kotlinx.serialization.json.JsonElement> = emptyMap(),
+)
 
 @kotlinx.serialization.Serializable
 @kotlinx.serialization.ExperimentalSerializationApi

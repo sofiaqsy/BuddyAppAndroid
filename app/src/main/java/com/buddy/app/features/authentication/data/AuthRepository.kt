@@ -14,6 +14,7 @@ import javax.inject.Singleton
 class AuthRepository @Inject constructor(
     private val api: AuthApi,
     private val store: SessionStore,
+    private val journeysStore: com.buddy.app.core.data.store.JourneysStore,
 ) {
     /**
      * @param provider "google" (Android usa Credential Manager; "apple" queda
@@ -41,7 +42,13 @@ class AuthRepository @Inject constructor(
         )
     }
 
-    suspend fun signOut() = store.clear()
+    /** No solo la sesión: journeys en disco es cache de ESTE traveler — con
+     *  otra cuenta a punto de entrar en el mismo dispositivo, dejarlo vivo
+     *  filtraba sus viajes a la cuenta nueva por un instante en el arranque. */
+    suspend fun signOut() {
+        store.clear()
+        journeysStore.clear()
+    }
 
     companion object { private const val TAG = "AuthRepo" }
 }

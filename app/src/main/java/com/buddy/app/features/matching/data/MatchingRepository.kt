@@ -1,8 +1,10 @@
 package com.buddy.app.features.matching.data
 
+import com.buddy.app.core.data.store.HomeBootstrapStore
 import com.buddy.app.core.network.SseClient
 import com.buddy.app.core.network.SseEvent
 import kotlinx.coroutines.flow.Flow
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -26,6 +28,7 @@ class MatchingRepository @Inject constructor(
     private val api: MatchingApi,
     private val sse: SseClient,
     private val matchingStore: com.buddy.app.core.data.store.MatchingStore,
+    private val bootstrap: HomeBootstrapStore,
 ) {
     /**
      * Mi solicitud abierta, o null si no tengo ninguna.
@@ -36,6 +39,12 @@ class MatchingRepository @Inject constructor(
      * legítima, no un fallo.
      */
     suspend fun myRequest(): ApiHelpRequest? {
+        // "no hay solicitud" (data: null) HomeBootstrapStore la descarta al
+        // guardar, así que solo se sirve de aquí cuando SÍ hay una — el caso
+        // sin solicitud sigue yendo a la red, que es igual de barato (204/null).
+        bootstrap.datos("myRequest")?.let {
+            return bootstrap.decodificar(it, ApiHelpRequest.serializer())
+        }
         val resp = api.myRequestRaw()
         if (!resp.isSuccessful) throw retrofit2.HttpException(resp)
         val texto = resp.body()?.string()?.trim().orEmpty()
@@ -69,7 +78,9 @@ class MatchingRepository @Inject constructor(
     /** Para quien ESPERA un buddy: siempre al servidor. */
     suspend fun refreshMatches(trigger: String): List<ApiMatch> = matchingStore.refresh(trigger)
 
-    suspend fun myOffers(): List<ApiBuddyOffer> = api.myOffers()
+    suspend fun myOffers(): List<ApiBuddyOffer> =
+        bootstrap.datos("myOffers")?.let { bootstrap.decodificar(it, ListSerializer(ApiBuddyOffer.serializer())) }
+            ?: api.myOffers()
 
     /**
      * "Oportunidades para ayudar" — solicitudes dentro de la cobertura del
@@ -77,7 +88,9 @@ class MatchingRepository @Inject constructor(
      * que aún están en la ventana de exclusividad de otro buddy
      * (isCommunityUnlocked = false).
      */
-    suspend fun availableHelp(): List<ApiHelpRequest> = api.requestsForBuddy()
+    suspend fun availableHelp(): List<ApiHelpRequest> =
+        bootstrap.datos("forBuddy")?.let { bootstrap.decodificar(it, ListSerializer(ApiHelpRequest.serializer())) }
+            ?: api.requestsForBuddy()
 
     suspend fun acceptOffer(requestId: String): ApiMatch = api.acceptRequest(AcceptBody(requestId))
 

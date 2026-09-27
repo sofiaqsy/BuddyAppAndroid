@@ -34,6 +34,7 @@ import javax.inject.Singleton
 @Singleton
 class SpotsRepository @Inject constructor(
     private val api: HomeApi,
+    private val bootstrap: com.buddy.app.core.data.store.HomeBootstrapStore,
     @ApplicationContext private val context: Context,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -74,7 +75,13 @@ class SpotsRepository @Inject constructor(
                 scope.async<Unit> {
                     _isLoading.value = true
                     try {
-                        val cards = api.placeShares(limit = 12, lat = lat, lng = lng).items
+                        val desdeBootstrap = bootstrap.datos("placeShares", paraLat = lat, paraLng = lng)
+                        val cards = if (desdeBootstrap != null) {
+                            Log.d(TAG, "🗂️ [spots] $reason: ← /home/bootstrap (sin red aparte)")
+                            bootstrap.decodificar(desdeBootstrap, com.buddy.app.core.data.model.ApiPlaceCardsResponse.serializer()).items
+                        } else {
+                            api.placeShares(limit = 12, lat = lat, lng = lng).items
+                        }
                         if (gen != generation) {
                             Log.d(TAG, "🗂️ [spots] $reason: respuesta superada por una más nueva — descartada")
                             return@async
