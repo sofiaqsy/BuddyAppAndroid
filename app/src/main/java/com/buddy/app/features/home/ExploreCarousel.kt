@@ -12,6 +12,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -21,39 +22,33 @@ import androidx.compose.ui.input.pointer.pointerInput
 import com.buddy.app.core.location.DistanceResolver
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -62,83 +57,22 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.buddy.app.core.data.model.ApiPlaceCard
 import com.buddy.app.core.designsystem.BuddyColor
-import com.buddy.app.core.designsystem.Radius
-import kotlinx.coroutines.launch
 import kotlin.math.abs
-import kotlin.math.min
 
-// Medidas del carrusel — las mismas que iOS, en dp.
-//
-// El tamaño BASE es fijo y el escalado NUNCA lo toca: si el layout dependiera
-// del tamaño ya escalado, las tres cards terminarían ocupando el mismo espacio
-// visual y el efecto se pierde. La fila siempre reserva este ancho por card;
-// scale + zIndex dibujan la del centro invadiendo el espacio de sus vecinas,
-// como el carrusel destacado de la App Store.
-// Tamaño final de iOS: la foto creció 15% + 10% + 10% + 10% sobre la base
-// 160×207, y todo el bloque escala con la pantalla hasta un 30% más, siempre
-// que tarjetas + "Consultar a buddies" quepan en una pantalla (la tarjeta, ya
-// escalada al centro, no pasa del 55% del alto).
-private const val PhotoExtra = 1.15f * 1.10f * 1.10f * 1.10f
-private val ScreenHeightDp: Float =
-    android.content.res.Resources.getSystem().displayMetrics.let { it.heightPixels / it.density }
-private val SizeFactor: Float = run {
-    val maxCardHeight = ScreenHeightDp * 0.55f / (1f + 0.22f)
-    ((maxCardHeight - 70f) / (207f * PhotoExtra)).coerceIn(1f, 1.3f)
-}
-/** ×1.3 y luego −10% (espejo de iOS). El ancho acompaña solo, porque sale de
- *  este alto. */
-private const val CardBoost = 1.3f * 0.9f * 1.05f
-private val PhotoHeight = (207f * PhotoExtra * SizeFactor * CardBoost).dp
-/** El ancho sale del alto de la foto en 3:4 (foto vertical de teléfono). Con el
- *  ancho fijo en 160 mientras el alto crecía, la foto quedaba casi 1:2: una
- *  tira delgada que recortaba la imagen original. Espejo del arreglo de iOS. */
-private val CardWidth = PhotoHeight * 3f / 4f
-/** La banda de texto mide 70: 7 de aire arriba, 8 (categoría) + 3 + 20 (nombre)
- *  + 3 + 20 (autor) = 54, y 7 abajo. */
-private val CardHeight = PhotoHeight + 70.dp
+// Pager de ancho completo: la foto ES la tarjeta, el texto va ENCIMA sobre un
+// degradado. El alto no se calcula acá — lo decide el llamador (weight(1f)
+// en el Home, para ocupar el espacio libre de la pantalla, espejo de
+// .frame(maxHeight: .infinity) en iOS), y cada card lo llena con
+// fillParentMaxHeight().
 
-/** 0.22 y no más: con 0.32 el contraste era tan alto que la card central se
- *  leía como "opción seleccionada" en vez de como profundidad. Y no menos,
- *  porque el efecto vive justamente de ese contraste. */
-private const val ScaleDelta = 0.22f
-
-/** Distancia a la que una card ya está completamente "al fondo". En dp, no en
- *  píxeles: iOS la expresa en puntos y hay que convertirla, no copiarla. */
-private val ScaleFalloff = 160.dp  // referencia; la curva usa el paso real
-
-/**
- * Escala por distancia al centro, con suavizado (smoothstep). Espejo del
- * arreglo de iOS: la normalización usaba una constante vieja (160) en vez del
- * paso real entre tarjetas, y la curva lineal hacía que el cambio de card se
- * sintiera "de golpe". Con el paso real y la curva suave, la tarjeta crece y
- * decrece de forma continua.
- */
-private fun escalaPara(distancia: Float, pasoPx: Float): Float {
-    val n = min(distancia / pasoPx, 1f)
-    val suave = n * n * (3f - 2f * n)
-    return 1f + (1f - suave) * ScaleDelta
-}
-
-/** true mientras se hace pinch sobre una foto: la fila y la pantalla dejan de
- *  desplazarse, como en iOS (CarouselZoomState). */
+/** true mientras se hace pinch sobre una foto: el pager deja de desplazarse
+ *  mientras dura, como en iOS (CarouselZoomState). */
 object CarouselZoom {
     var isZooming by mutableStateOf(false)
 }
-
-/** Aire vertical que la fila reserva ARRIBA Y ABAJO para que la card escalada
- *  no se recorte. scale no altera el layout, así que la fila mide CardHeight y
- *  la central —un 22% más alta— se sale por los dos lados: hay que sumarlo dos
- *  veces, no una. Con una sola la tarjeta salía cortada.
- *
- *  Exactamente lo que desborda y 2dp de margen. Antes eran 8 de propina y se
- *  veían como un hueco bajo las fotos. */
-private val VerticalSlack = CardHeight * ScaleDelta / 2 + 2.dp
-
-private val CardSpacing = 10.dp
 
 /**
  * Explora {ciudad} — el carrusel de lugares que recomiendan los buddies.
@@ -151,10 +85,11 @@ private val CardSpacing = 10.dp
  * Una card por FOTO, no por lugar: si "El Encanto" tiene 3 fotos, se ven 3
  * tarjetas. Es lo que hace iOS y lo que el backend ordena en cover_urls.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ExploreCarousel(
     cards: List<ApiPlaceCard>,
-    /** Tocar la card ya centrada abre ese lugar. Las laterales solo se centran. */
+    /** Tocar la card abre ese lugar. */
     onOpenPlace: (ApiPlaceCard) -> Unit,
     modifier: Modifier = Modifier,
     /** Dibuja el carrusel REAL con tarjetas de relleno, no una silueta parecida:
@@ -196,159 +131,113 @@ fun ExploreCarousel(
     }
     if (photos.isEmpty()) return
 
-    val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
+    // Scroll infinito: un índice VIRTUAL enorme, mapeado al real con módulo.
+    // El pager arranca a la mitad de ese rango — de ahí se puede seguir para
+    // cualquiera de los dos lados sin llegar nunca al borde real. No hay
+    // "vuelta al principio" que notar: la lista simplemente no se acaba.
+    val realCount = photos.size
+    // remember(realCount) y no rememberLazyListState(initialFirstVisibleItemIndex=):
+    // ese initial solo se respeta en la PRIMERA composición. La pantalla pasa
+    // por un esqueleto antes de los datos reales — con menos cards que el
+    // set real — así que si el índice de arranque quedaba alineado al
+    // esqueleto, al llegar los datos reales el mismo índice virtual caía en
+    // OTRA foto por el cambio de módulo: la card saltaba a algo random justo
+    // cuando debía mostrar la primera de verdad. remember(realCount) fuerza
+    // un LazyListState nuevo, alineado al conteo correcto, cada vez que el
+    // conteo cambia.
+    val listState = remember(realCount) {
+        val startIndex = (Int.MAX_VALUE / 2) - (Int.MAX_VALUE / 2) % realCount
+        androidx.compose.foundation.lazy.LazyListState(firstVisibleItemIndex = startIndex)
+    }
 
-    BoxWithConstraints(modifier.fillMaxWidth()) {
-        val sideInset = ((maxWidth - CardWidth) / 2).coerceAtLeast(0.dp)
-        val density = androidx.compose.ui.platform.LocalDensity.current
-        val viewportCenterPx = with(density) { maxWidth.toPx() / 2f }
-        // El falloff de iOS está en PUNTOS y acá las distancias vienen en
-        // PÍXELES. Comparar 160 contra píxeles lo hacía ~3× más estrecho en un
-        // teléfono de densidad 3: casi ninguna card llegaba a escalar y el
-        // tamaño saltaba de golpe en vez de degradarse.
-        val falloffPx = with(density) { (CardWidth + CardSpacing).toPx() }
 
-        // Índice de la card centrada — fuente de verdad única para el zIndex y
-        // para decidir si un tap abre el lugar o solo lo centra. Derivado del
-        // scroll real y no de un estado propio: escribirlo a mano dejaba el
-        // z-order desactualizado durante todo el arrastre.
-        val centerIndex by remember {
-            derivedStateOf {
-                val info = listState.layoutInfo
-                info.visibleItemsInfo.minByOrNull {
-                    abs(centroDe(it, info) - viewportCenterPx)
-                }?.index ?: 0
-            }
-        }
-
-        // TEMPORAL — quitar antes de publicar.
+    // Pager vertical simple: una card por página, ancho completo, swipe hacia
+    // abajo para la siguiente. Antes era un Coverflow horizontal (peek +
+    // escala por distancia al centro) — se cambió el eje pero no el contenido
+    // de cada card, que sigue siendo ExploreCarouselCard tal cual.
+    LazyColumn(
+        state = listState,
+        // El snap deja siempre una card completa a la vista — sin él el pager
+        // para a mitad de camino entre dos fotos.
         //
-        // EN REPOSO, que es el estado que importa: el log anterior solo saltaba
-        // al cambiar centerIndex, o sea a media pasada del dedo, y nunca decía
-        // dónde queda el carrusel cuando se detiene — que es justo donde la
-        // card grande sale en el sitio equivocado.
-        androidx.compose.runtime.LaunchedEffect(listState) {
-            androidx.compose.runtime.snapshotFlow { listState.isScrollInProgress }
-                .collect { moviendose ->
-                    if (moviendose) return@collect
-                    val info = listState.layoutInfo
-                    val vis = info.visibleItemsInfo.map { i ->
-                        val mid = centroDe(i, info)
-                        val s = escalaPara(abs(mid - viewportCenterPx), falloffPx)
-                        "[${i.index}] off=${i.offset} size=${i.size} mid=${mid.toInt()} d=${(mid - viewportCenterPx).toInt()} scale=${"%.2f".format(s)}"
-                    }
-                    android.util.Log.d(
-                        "ExploreCarousel",
-                        "REPOSO centro=$centerIndex ancho=${maxWidth} inset=$sideInset viewportCenter=${viewportCenterPx.toInt()} " +
-                        "viewportPx=${info.viewportSize.width} beforeContent=${info.beforeContentPadding} afterContent=${info.afterContentPadding} " +
-                        "firstVisible=${listState.firstVisibleItemIndex}+${listState.firstVisibleItemScrollOffset} | ${vis.joinToString(" ")}"
-                    )
-                }
-        }
-
-        androidx.compose.runtime.LaunchedEffect(centerIndex) {
-            val vis = listState.layoutInfo.visibleItemsInfo.map { i ->
-                val mid = i.offset + i.size / 2f
-                val s = escalaPara(abs(mid - viewportCenterPx), falloffPx)
-                "[${i.index}] mid=${mid.toInt()} d=${(mid - viewportCenterPx).toInt()} scale=${"%.2f".format(s)}"
+        // El spring por default (StiffnessMediumLow) es el sospechoso más
+        // probable de la sensación de "lento": es un resorte pensado para
+        // listas genéricas, no para un asentado corto y decidido. Se sube
+        // la rigidez y se quita el rebote (DampingRatioNoBouncy) — decidido
+        // sin sentirse brusco. Falta medir en dispositivo real si el resto
+        // (jank de decode de imagen, etc.) también pesa — no se tocó nada
+        // de Coil todavía porque AsyncImage ya pide el tamaño medido del
+        // composable, no el original: ese sospechoso de la revisión no
+        // aplica acá sin medir primero.
+        flingBehavior = run {
+            val baseProvider = remember(listState) {
+                androidx.compose.foundation.gestures.snapping.SnapLayoutInfoProvider(listState)
             }
-            android.util.Log.d(
-                "ExploreCarousel",
-                "centro=$centerIndex viewportCenter=${viewportCenterPx.toInt()} falloff=${falloffPx.toInt()} fotos=${photos.size} | ${vis.joinToString(" ")}"
-            )
-        }
-
-        LazyRow(
-            state = listState,
-            horizontalArrangement = Arrangement.spacedBy(CardSpacing),
-            contentPadding = PaddingValues(horizontal = sideInset),
-            // El snap deja siempre una card centrada — sin él el carrusel para
-            // a mitad de camino y ninguna es "la del medio", que es justo lo
-            // que el zIndex y el tap necesitan saber.
-            flingBehavior = rememberSnapFlingBehavior(listState),
-            userScrollEnabled = !isSkeleton && !CarouselZoom.isZooming,
-            // CenterVertically y no el Top por defecto.
-            //
-            // La card crece un 22% alrededor de SU CENTRO. Alineada arriba, ese
-            // centro está a media altura de la card pero el aire reservado
-            // quedaba todo abajo: la parte de arriba se salía de la fila y se
-            // montaba sobre "Lugares que recomiendan los buddies de Lima".
-            // Centrada, el desbordamiento se reparte entre las dos holguras que
-            // la fila ya reserva.
-            verticalAlignment = Alignment.CenterVertically,
-            // Aire vertical para que la card escalada no se recorte contra el
-            // borde de la fila: scale no altera el layout, así que la fila
-            // sigue midiendo CardHeight y la central se saldría por arriba.
-            modifier = Modifier.height(CardHeight + VerticalSlack * 2),
-        ) {
-            itemsIndexed(photos) { index, photo ->
-                ExploreCarouselCard(
-                    photo = photo,
-                    isSkeleton = isSkeleton,
-                    userLat = userLat,
-                    userLng = userLng,
-                    isNearest = photo.place.id == nearestId,
-                    modifier = Modifier
-                        .width(CardWidth)
-                        .height(CardHeight)
-                        .zIndex(-abs(index - centerIndex).toFloat())
-                        // graphicsLayer y no scale(valor): el bloque se re-evalúa
-                        // cuando cambia el estado que lee, o sea en cada frame de
-                        // scroll. Leyendo layoutInfo en la composición del item,
-                        // la escala se calculaba con las posiciones del frame
-                        // ANTERIOR —y en la primera pasada con la lista vacía—,
-                        // así que la card grande no era la del centro. Es el
-                        // equivalente de visualEffect en iOS: render-only.
-                        .graphicsLayer {
-                            val info = listState.layoutInfo
-                            val item = info.visibleItemsInfo.firstOrNull { it.index == index }
-                            val distance = item
-                                ?.let { abs(centroDe(it, info) - viewportCenterPx) }
-                                ?: falloffPx
-                            val s = escalaPara(distance, falloffPx)
-                            scaleX = s
-                            scaleY = s
-                        }
-                        .clickable(
-                            enabled = !isSkeleton,
-                            indication = null,
-                            interactionSource = remember { MutableInteractionSource() },
-                        ) {
-                            // La card centrada ya no necesita centrarse: su tap
-                            // es el que abre el lugar. Las laterales se traen al
-                            // medio, para no obligar a arrastrar de a una.
-                            if (index == centerIndex) onOpenPlace(photo.place)
-                            else scope.launch { listState.animateScrollToItem(index) }
-                        },
+            // calculateApproachOffset en 0: sin esto, un swipe brusco usaba
+            // el decay para "acercarse" antes de buscar dónde encajar, y ese
+            // acercamiento podía cruzar varias cards de un tirón — el bug
+            // reportado ("de un swipe rápido salta muchas recomendaciones").
+            // En 0 el fling SIEMPRE resuelve por snap directo al vecino más
+            // cercano en la dirección del gesto: como mucho, una card.
+            val singleStepProvider = remember(baseProvider) {
+                object : androidx.compose.foundation.gestures.snapping.SnapLayoutInfoProvider by baseProvider {
+                    override fun calculateApproachOffset(velocity: Float, decayOffset: Float): Float = 0f
+                }
+            }
+            val decay = androidx.compose.animation.rememberSplineBasedDecay<Float>()
+            remember(singleStepProvider, decay) {
+                androidx.compose.foundation.gestures.snapping.SnapFlingBehavior(
+                    snapLayoutInfoProvider = singleStepProvider,
+                    decayAnimationSpec = decay,
+                    snapAnimationSpec = spring(
+                        dampingRatio = Spring.DampingRatioNoBouncy,
+                        stiffness = 800f,
+                    ),
                 )
             }
+        },
+        userScrollEnabled = !isSkeleton && !CarouselZoom.isZooming,
+        // Sin height fijo: el llamador decide el alto (weight(1f) en el Home
+        // para ocupar el espacio libre, o un tamaño fijo en otros usos).
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        // count = Int.MAX_VALUE y no photos.size: es lo que hace el loop
+        // posible. La key combina índice virtual + id real — así cada vuelta
+        // del ciclo es una key distinta (Compose la pide única) pero el
+        // CONTENIDO en cada posición es siempre el que toca según el módulo.
+        items(
+            count = Int.MAX_VALUE,
+            key = { virtualIndex -> "$virtualIndex-${photos[virtualIndex % realCount].id}" },
+        ) { virtualIndex ->
+            val photo = photos[virtualIndex % realCount]
+            ExploreCarouselCard(
+                photo = photo,
+                isSkeleton = isSkeleton,
+                userLat = userLat,
+                userLng = userLng,
+                isNearest = photo.place.id == nearestId,
+                modifier = Modifier
+                    .fillParentMaxWidth()
+                    .fillParentMaxHeight()
+                    .clickable(
+                        enabled = !isSkeleton,
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() },
+                    ) { onOpenPlace(photo.place) },
+            )
         }
     }
 }
 
 /**
- * Centro de una card DENTRO del viewport, en píxeles.
- *
- * `LazyListItemInfo.offset` NO incluye el contentPadding inicial: la primera
- * card reporta offset=0 aunque se dibuje 502px más a la derecha. Sin sumar
- * `beforeContentPadding`, todo el cálculo quedaba corrido exactamente un inset
- * y la card que el código creía centrada aparecía pegada al borde derecho —
- * en reposo la grande era la tercera, no la primera.
- */
-private fun centroDe(
-    item: androidx.compose.foundation.lazy.LazyListItemInfo,
-    info: androidx.compose.foundation.lazy.LazyListLayoutInfo,
-): Float = item.offset + info.beforeContentPadding + item.size / 2f
-
-/**
  * Deja que el carrusel sangre hasta el borde de la pantalla aunque su
- * contenedor tenga padding lateral. El peek de las cards vecinas es parte del
- * efecto: con el padding del Home la del centro quedaba pegada al recorte y las
- * laterales casi no asomaban.
+ * contenedor tenga padding lateral (el composer entero lo tiene, para la
+ * cabecera y el subtítulo). Sin esto la foto queda inset — un borde en
+ * blanco a los lados que iOS no tiene, porque ahí el carrusel sale del
+ * padding con GeometryReader.
  *
- * Un layout modifier y no padding negativo: Compose rechaza un padding menor
- * que cero.
+ * Un layout modifier y no padding negativo: Compose rechaza un padding
+ * menor que cero.
  */
 fun Modifier.sangraLateral(cantidad: androidx.compose.ui.unit.Dp) =
     layout { measurable, constraints ->
@@ -375,19 +264,11 @@ private data class ExplorePhoto(
     val authorAvatarUrl: String?,
 )
 
-/** itemsIndexed con key estable: sin ella, reordenar cover_urls recicla las
- *  cards contra la foto equivocada. */
-private fun androidx.compose.foundation.lazy.LazyListScope.itemsIndexed(
-    photos: List<ExplorePhoto>,
-    content: @Composable (Int, ExplorePhoto) -> Unit,
-) = items(photos.size, key = { photos[it].id }) { i -> content(i, photos[i]) }
-
 /**
- * Foto arriba, ficha abajo — espejo de ExploreCarouselCard (iOS).
- *
- * Con el texto SOBRE la imagen hacía falta oscurecerla justo donde suele estar
- * el lugar; con la ficha aparte la foto se ve entera y el texto no depende de
- * lo que haya detrás.
+ * La foto ES la tarjeta — espejo exacto de ExploreCarouselCard (iOS): nombre,
+ * categoría y quién recomienda van ENCIMA de la imagen, sobre un degradado,
+ * en vez de robarle una banda propia. Sin esquinas redondeadas ni borde: la
+ * foto llega a los bordes y es ella la que delimita la tarjeta.
  */
 @Composable
 private fun ExploreCarouselCard(
@@ -410,7 +291,16 @@ private fun ExploreCarouselCard(
         if (nueva != null && DistanceResolver.shouldUpdate(shownDistance, nueva)) shownDistance = nueva
         isHere = DistanceResolver.isHere(isHere, shownDistance, isNearest)
     }
-    val etiqueta = shownDistance?.let { if (isHere) "Estás aquí" else DistanceResolver.label(it) }
+    // El prefijo "Distancia" solo tiene sentido cuando lo que se muestra ES
+    // una distancia (no "Estás aquí"), y solo pasados 2 km — de cerca la cifra
+    // ya se explica sola. Espejo de etiquetaDistancia (iOS).
+    val etiqueta = shownDistance?.let {
+        if (isHere) "Estás aquí"
+        else {
+            val base = DistanceResolver.label(it)
+            if (it < 2000) base else "Distancia $base"
+        }
+    }
 
     // Zoom leve al cambiar el valor, solo en cambios reales.
     var pulsando by remember { mutableStateOf(false) }
@@ -430,215 +320,208 @@ private fun ExploreCarouselCard(
         animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMediumLow),
         label = "pulsoDistancia",
     )
-    Column(
-        modifier
-            .clip(RoundedCornerShape(Radius.md))
-            .background(BuddyColor.Surface)
-            .border(1.dp, BuddyColor.Border, RoundedCornerShape(Radius.md)),
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(PhotoHeight)
-                // El zoom se queda dentro de la foto: no invade la banda de texto.
-                .clipToBounds()
-                .background(BuddyColor.SurfaceRaised),
-        ) {
-            if (photo.url != null) {
-                // Pinch para acercar la foto (el gesto instintivo al mirar una
-                // foto). Solo con dos dedos: con uno el arrastre sigue siendo de
-                // la fila. Al soltar vuelve a su tamaño. Mientras dura, ni la
-                // fila ni la pantalla se mueven.
-                var zoom by remember { mutableStateOf(1f) }
-                var ancla by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Unspecified) }
-                val zoomAnimado by animateFloatAsState(
-                    targetValue = zoom,
-                    animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMedium),
-                    label = "zoomFoto",
-                )
+
+    Box(modifier.clipToBounds()) {
+        if (photo.url != null) {
+            // Pinch para acercar la foto (el gesto instintivo al mirar una
+            // foto). Solo con dos dedos: con uno el arrastre sigue siendo del
+            // pager. Al soltar vuelve a su tamaño. Mientras dura, ni el pager
+            // ni la pantalla se mueven.
+            var zoom by remember { mutableStateOf(1f) }
+            var ancla by remember { mutableStateOf(androidx.compose.ui.geometry.Offset.Unspecified) }
+            val zoomAnimado by animateFloatAsState(
+                targetValue = zoom,
+                animationSpec = spring(dampingRatio = 0.85f, stiffness = Spring.StiffnessMedium),
+                label = "zoomFoto",
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            do {
+                                val event = awaitPointerEvent()
+                                if (event.changes.count { it.pressed } >= 2) {
+                                    CarouselZoom.isZooming = true
+                                    zoom = (zoom * event.calculateZoom()).coerceIn(1f, 4f)
+                                    ancla = event.calculateCentroid(useCurrent = true)
+                                    event.changes.forEach { it.consume() }
+                                }
+                            } while (event.changes.any { it.pressed })
+                            CarouselZoom.isZooming = false
+                            zoom = 1f
+                        }
+                    }
+                    .graphicsLayer {
+                        scaleX = zoomAnimado
+                        scaleY = zoomAnimado
+                        if (ancla != androidx.compose.ui.geometry.Offset.Unspecified && size.width > 0f) {
+                            transformOrigin = TransformOrigin(
+                                (ancla.x / size.width).coerceIn(0f, 1f),
+                                (ancla.y / size.height).coerceIn(0f, 1f),
+                            )
+                        }
+                    },
+            ) {
+                // Crop y no Fit: espejo exacto de iOS (.scaledToFill() en
+                // ExploreCarouselCard). La foto llena la tarjeta de borde a
+                // borde, sin franjas — el blur-backdrop es de OTRO componente
+                // (memoir), no de este carrusel.
                 AsyncImage(
                     model = photo.url,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(PhotoHeight)
-                        .pointerInput(Unit) {
-                            awaitEachGesture {
-                                awaitFirstDown(requireUnconsumed = false)
-                                do {
-                                    val event = awaitPointerEvent()
-                                    if (event.changes.count { it.pressed } >= 2) {
-                                        CarouselZoom.isZooming = true
-                                        zoom = (zoom * event.calculateZoom()).coerceIn(1f, 4f)
-                                        ancla = event.calculateCentroid(useCurrent = true)
-                                        event.changes.forEach { it.consume() }
-                                    }
-                                } while (event.changes.any { it.pressed })
-                                CarouselZoom.isZooming = false
-                                zoom = 1f
-                            }
-                        }
-                        .graphicsLayer {
-                            scaleX = zoomAnimado
-                            scaleY = zoomAnimado
-                            if (ancla != androidx.compose.ui.geometry.Offset.Unspecified && size.width > 0f) {
-                                transformOrigin = TransformOrigin(
-                                    (ancla.x / size.width).coerceIn(0f, 1f),
-                                    (ancla.y / size.height).coerceIn(0f, 1f),
-                                )
-                            }
-                        },
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
-            // Un lugar propuesto y aún sin aprobar. Va SOBRE la foto y no al pie
-            // porque cambia cómo se lee toda la tarjeta: lo que muestra existe
-            // solo para ti hasta que se apruebe, y enterarse al final sería
-            // enterarse tarde. Sin icono de alerta: es un estado de espera, no
-            // un problema del usuario.
-            if (place.estaPendiente) {
-                Text(
-                    "PENDIENTE DE APROBACIÓN",
-                    fontSize = 8.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.5.sp,
-                    color = BuddyColor.InkInverse,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(8.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(BuddyColor.Ink.copy(alpha = 0.45f))
-                        .padding(horizontal = 6.dp, vertical = 3.dp),
-                )
-            }
-            // Distancia sobre la foto y no en la ficha: la ficha tiene sus 70dp
-            // repartidos al punto. Solo texto, sin icono. "Estás aquí" en color
-            // de marca: es la única señal que cambia lo que el viajero puede hacer.
-            if (!isSkeleton && etiqueta != null) {
-                AnimatedContent(
-                    targetState = etiqueta,
-                    // Los dígitos ruedan en vez de reemplazarse de golpe.
-                    transitionSpec = {
-                        (slideInVertically { it } + fadeIn()) togetherWith (slideOutVertically { -it } + fadeOut())
-                    },
-                    label = "etiquetaDistancia",
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(6.dp)
-                        .graphicsLayer {
-                            scaleX = escala
-                            scaleY = escala
-                            transformOrigin = TransformOrigin(0f, 0f)
-                        }
-                        .clip(RoundedCornerShape(50))
-                        .background(if (isHere) BuddyColor.Brand else BuddyColor.Surface.copy(alpha = 0.85f))
-                        .padding(horizontal = 6.dp, vertical = 3.dp),
-                ) { texto ->
-                    Text(
-                        texto,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (isHere) BuddyColor.InkInverse else BuddyColor.Ink,
-                        maxLines = 1,
-                    )
-                }
-            }
-            // Una línea y no un degradado: la foto termina donde termina y la
-            // ficha empieza donde empieza. Es la misma línea del borde de la
-            // card, así el corte se lee como parte del recuadro.
-            Box(
-                Modifier
-                    .align(Alignment.BottomStart)
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(BuddyColor.Border),
+        } else {
+            Box(Modifier.fillMaxSize().background(BuddyColor.SurfaceRaised))
+        }
+
+        // Degradado propio y no material: tiene que oscurecer lo justo para
+        // que el texto se lea sobre cualquier foto y desaparecer antes de la
+        // mitad. Empieza transparente para no ensuciar la imagen.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        1f to BuddyColor.Ink.copy(alpha = 0.62f),
+                    ),
+                ),
+        )
+
+        // Un lugar propuesto y aún sin aprobar. Va SOBRE la foto y no al pie
+        // porque cambia cómo se lee toda la tarjeta: lo que muestra existe
+        // solo para ti hasta que se apruebe, y enterarse al final sería
+        // enterarse tarde. Sin icono de alerta: es un estado de espera, no un
+        // problema del usuario.
+        if (place.estaPendiente) {
+            Text(
+                "PENDIENTE DE APROBACIÓN",
+                fontSize = 8.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.5.sp,
+                color = BuddyColor.InkInverse,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(BuddyColor.Ink.copy(alpha = 0.45f))
+                    .padding(horizontal = 6.dp, vertical = 3.dp),
             )
         }
 
-        // Dentro de la ficha la jerarquía la hacen el color y el aire —etiqueta
-        // tenue, nombre en ink, autor apagado—, sin más reglas.
+        // Distancia sobre la foto, esquina superior izquierda. Solo texto,
+        // sin icono. "Estás aquí" en color de marca: es la única señal que
+        // cambia lo que el viajero puede hacer.
+        if (!isSkeleton && etiqueta != null) {
+            AnimatedContent(
+                targetState = etiqueta,
+                // Los dígitos ruedan en vez de reemplazarse de golpe.
+                transitionSpec = {
+                    (slideInVertically { it } + fadeIn()) togetherWith (slideOutVertically { -it } + fadeOut())
+                },
+                label = "etiquetaDistancia",
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .graphicsLayer {
+                        scaleX = escala
+                        scaleY = escala
+                        transformOrigin = TransformOrigin(0f, 0f)
+                    }
+                    .clip(RoundedCornerShape(50))
+                    .background(if (isHere) BuddyColor.Brand else BuddyColor.Surface.copy(alpha = 0.85f))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) { texto ->
+                Text(
+                    texto,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (isHere) BuddyColor.InkInverse else BuddyColor.Ink,
+                    maxLines = 1,
+                )
+            }
+        }
+
+        // Dos líneas y no tres: el nombre manda, y categoría y quién
+        // recomienda comparten la segunda separadas por un punto medio.
+        // Alineado a la izquierda —como el resto de la app— para que no se
+        // lea como el pie de una publicación de red social.
         Column(
             Modifier
-                .fillMaxWidth()
-                .height(70.dp)
-                .padding(horizontal = 10.dp, vertical = 5.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .align(Alignment.BottomStart)
+                .padding(horizontal = 12.dp)
+                .padding(bottom = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            place.category?.takeIf { it.isNotEmpty() }?.let { cat ->
-                Text(
-                    cat.uppercase(),
-                    fontSize = 7.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.6.sp,
-                    color = BuddyColor.InkMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Spacer(Modifier.height(1.dp))
-            }
-
-            // Tamaños fijos y no tokens: mezclar un estilo del sistema con dos
-            // textos ya escalados rompería la proporción entre los tres.
             Text(
                 place.name,
-                fontSize = 12.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = BuddyColor.Ink,
-                textAlign = TextAlign.Center,
+                color = BuddyColor.InkInverse,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.height(1.dp))
 
-            // Quién recomienda el lugar, no cuánta gente lo conoce: la
-            // recomendación de una persona concreta pesa más como prueba social
-            // que un conteo, y encadena con el subtítulo de arriba.
             val autor = photo.authorName?.trim()?.takeIf { it.isNotEmpty() }
                 ?.split(" ")?.firstOrNull()
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            // Blanco apagado: la segunda línea acompaña al nombre, no compite
+            // con él, y sigue legible sobre el degradado. Un solo color para
+            // toda la fila, como el foregroundStyle de iOS sobre el HStack.
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.material3.LocalContentColor provides BuddyColor.InkInverse.copy(alpha = 0.88f),
             ) {
-                if (photo.authorName != null && !isSkeleton) {
-                    Box(
-                        Modifier.size(15.dp).clip(CircleShape).background(BuddyColor.SurfaceRaised),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (photo.authorAvatarUrl != null) {
-                            AsyncImage(
-                                model = photo.authorAvatarUrl,
-                                contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.size(15.dp).clip(CircleShape),
-                            )
-                        } else {
-                            Text(
-                                photo.authorName.take(1).uppercase(),
-                                fontSize = 7.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = BuddyColor.Ink,
-                            )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    place.category?.takeIf { it.isNotEmpty() }?.let { cat ->
+                        Text(cat.replaceFirstChar { it.uppercase() }, fontSize = 12.5.sp)
+                        Text("·", fontSize = 12.5.sp)
+                    }
+                    if (photo.authorName != null && !isSkeleton) {
+                        Box(
+                            Modifier.size(16.dp).clip(CircleShape).background(BuddyColor.SurfaceRaised),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (photo.authorAvatarUrl != null) {
+                                AsyncImage(
+                                    model = photo.authorAvatarUrl,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.size(16.dp).clip(CircleShape),
+                                )
+                            } else {
+                                Text(
+                                    photo.authorName.take(1).uppercase(),
+                                    fontSize = 7.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BuddyColor.Ink,
+                                )
+                            }
                         }
                     }
+                    Text(
+                        // El nombre se distingue solo por peso: en brand competía de
+                        // igual a igual con el del lugar.
+                        buildAnnotatedString {
+                            if (autor != null) {
+                                append("Recomendado por ")
+                                withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(autor) }
+                            } else {
+                                append("Recomendado por la comunidad")
+                            }
+                        },
+                        fontSize = 12.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
-                Text(
-                    // El nombre se distingue solo por peso: en brand competía de
-                    // igual a igual con el del lugar.
-                    buildAnnotatedString {
-                        if (autor != null) {
-                            append("Recomendado por ")
-                            withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(autor) }
-                        } else {
-                            append("Recomendado por la comunidad")
-                        }
-                    },
-                    fontSize = 9.5.sp,
-                    color = BuddyColor.InkMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
             }
         }
     }

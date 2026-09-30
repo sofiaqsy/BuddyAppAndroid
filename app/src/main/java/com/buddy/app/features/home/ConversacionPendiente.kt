@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
@@ -32,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -69,6 +72,10 @@ fun ConversacionPendiente(
     buscando: Boolean,
     onElegirCategoria: (String) -> Unit,
     onBack: () -> Unit,
+    /** A la vista, no solo al cerrar la pantalla: mientras se espera, poder
+     *  arrepentirse es lo segundo que el usuario busca. Espejo de
+     *  onCancelRequest (iOS) — null mientras no hay nada que cancelar. */
+    onCancelRequest: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val ciudad = destinationName ?: "la zona"
@@ -115,22 +122,43 @@ fun ConversacionPendiente(
         // ── Barra inferior ────────────────────────────────────────────────
         // Ocupa el sitio del campo de texto y dice por qué todavía no se puede
         // escribir. El área de abajo de un chat nunca queda vacía.
-        Row(
+        Column(
             Modifier
                 .fillMaxWidth()
                 .background(BuddyColor.Surface)
                 .padding(vertical = 16.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (categoriaElegida == null) {
-                Text("Elige un tema para empezar",
-                     style = BuddyType.Footnote, color = BuddyColor.InkMuted)
-            } else {
-                CircularProgressIndicator(Modifier.size(16.dp), color = BuddyColor.InkMuted, strokeWidth = 2.dp)
-                Spacer(Modifier.width(8.dp))
-                Text("Podrás escribir cuando un buddy se una",
-                     style = BuddyType.Footnote, color = BuddyColor.InkMuted)
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (categoriaElegida == null) {
+                    Text("Elige un tema para empezar",
+                         style = BuddyType.Footnote, color = BuddyColor.InkMuted)
+                } else {
+                    CircularProgressIndicator(Modifier.size(16.dp), color = BuddyColor.InkMuted, strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Podrás escribir cuando un buddy se una",
+                         style = BuddyType.Footnote, color = BuddyColor.InkMuted)
+                }
+            }
+            // Sin confirmación: cancelar es barato (se vuelve a elegir tema
+            // en un toque) y un modal sería un paso de más. Espejo exacto de
+            // "Cancelar solicitud" (iOS).
+            if (categoriaElegida != null && onCancelRequest != null) {
+                Text(
+                    "Cancelar solicitud",
+                    style = BuddyType.FootnoteBold,
+                    color = BuddyColor.ErrorRed,
+                    modifier = Modifier.clickable(
+                        indication = null,
+                        interactionSource = remember { MutableInteractionSource() },
+                        onClick = onCancelRequest,
+                    ),
+                )
             }
         }
     }
@@ -298,19 +326,30 @@ fun ConversacionPendienteHost(
     fun solicitar(category: String) {
         val ctx = state.effectiveHomeContext
         val esElTripConMatch = ctx is HomeContext.Trip && ctx.journeyId == state.activeJourney?.id
-        val esPionero = state.communityContext?.totalBuddies == 0
+        // ?: 0 y no == 0: si communityContext AÚN no cargó (null), tratarlo
+        // como "sin buddies" y no como "hay buddies" — la rama pioneer es
+        // segura (registra en silencio y ya), mientras que un findBuddy real
+        // sobre una zona que en verdad tiene 0 buddies deja una búsqueda
+        // abierta que nunca se resuelve. Antes esa carrera (tocar un tema
+        // antes de que llegue communityContext) creaba justo esa búsqueda
+        // fantasma — el CTA se quedaba "Buscando…" para siempre.
+        val esPionero = (state.communityContext?.totalBuddies ?: 0) == 0
         when {
             esElTripConMatch && state.activeMatchId != null -> Unit  // ya hay chat: el CTA lleva ahí
             esElTripConMatch && state.activeBuddyName != null -> onOpenConexiones()
-            // Pioneer: sin buddies no hay nada que buscar — registra trip +
-            // solicitud en silencio y navega a "Tu trip" (iOS).
+            // Pioneer: sin buddies no hay nada que buscar — registra la
+            // solicitud en silencio (sin crear trip) y se queda ACÁ MISMO,
+            // en esta conversación — no cierra ni navega a ningún lado. Tocar
+            // un tema no debería mandar de vuelta al Home: el usuario sigue
+            // viendo la misma pantalla, con categoriaElegida ya puesto por
+            // onElegirCategoria, mostrando el hilo en espera.
             esPionero && (state.destinationId != null || state.userLat != null) ->
                 matchingVm.pioneerRegister(
                     destinationId = state.destinationId,
                     lat = state.userLat, lng = state.userLng,
                     category = category,
                     cityName = state.destinationName,
-                    onDone = { onClose(); onOpenTrips() },
+                    onDone = {},
                 )
             state.destinationId != null ->
                 matchingVm.findBuddy(
@@ -362,7 +401,19 @@ fun ConversacionPendienteHost(
             buscando = searchState is com.buddy.app.features.matching.MatchingViewModel.SearchState.Searching,
             onElegirCategoria = { categoriaElegida = it; solicitar(it) },
             onBack = { cerrar() },
-            modifier = Modifier.fillMaxSize(),
+            // Cancela en el servidor y vuelve a elegir tema, SIN cerrar la
+            // pantalla — cerrar() (back/swipe) es la intención distinta de
+            // "ya no quiero ayuda, vuelvo al Home". Espejo de cancelSearch
+            // (iOS) en su rama "vino del selector".
+            onCancelRequest = {
+                matchingVm.cancelSearch()
+                categoriaElegida = null
+            },
+            // Se monta fuera del Scaffold, a pantalla completa (comentario más
+            // abajo) — sin esto el reloj de la barra de estado se pisaba con
+            // "Nueva consulta". Mismo systemBarsPadding que ya usa ChatScreen
+            // acá al lado, para el mismo caso.
+            modifier = Modifier.fillMaxSize().systemBarsPadding(),
         )
         }
     }

@@ -139,10 +139,16 @@ fun ConsultCta(
                             append(activeBuddyName)
                         }
                     } else {
+                        // El botón nombra el DESTINO: dice a dónde va la
+                        // consulta, que es lo que el subtítulo ya no repite.
+                        // Espejo exacto de iOS (ContactarBuddyView.ctaTitle).
                         withStyle(SpanStyle(color = BuddyColor.Ink, fontWeight = FontWeight.SemiBold)) {
                             append(
-                                if (buscando) "Buscando buddy…"
-                                else "Consultar a buddies"
+                                if (buscando) {
+                                    destinationName?.let { "Buscando buddies en $it…" } ?: "Buscando buddies…"
+                                } else {
+                                    destinationName?.let { "Consultar en $it" } ?: "Consultar a buddies"
+                                }
                             )
                         }
                     }

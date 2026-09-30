@@ -14,13 +14,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -29,6 +29,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Bed
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Coffee
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Hiking
@@ -57,6 +59,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -158,37 +161,24 @@ fun InicioScreen(
     // mudó a ConversacionPendienteHost: ahora la dispara el tema que se elige
     // DENTRO de la conversación, y esa vive fuera de esta pantalla.
 
-    // Logo fijo arriba y el contenido desplazándose debajo, como la barra de
-    // navegación de iOS.
-    Column(modifier.fillMaxSize().background(BuddyColor.Canvas)) {
+    // Logo fijo arriba y el resto de la pantalla, SIN scroll — espejo de
+    // scrollBody (iOS): el Home cabe entero en una pantalla, así que no hay
+    // rebote ni "hay más abajo" que no existe. Se quitó Comunidad Viva
+    // (recent help + pulse) para que esto siga siendo cierto — ver abajo.
+    //
+    // Box y no Column directo: la confirmación pioneer va de OVERLAY flotante
+    // abajo (como un toast), no empujando la cabecera — antes se dibujaba
+    // inline arriba del todo y se quedaba pegada ahí, tapando "Consulta con
+    // un buddy". Espejo exacto del .overlay(alignment: .bottom) de iOS.
+    Box(modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(BuddyColor.Canvas)) {
     com.buddy.app.core.designsystem.components.BuddyLogoHeader()
     Column(
-        Modifier.weight(1f).fillMaxWidth()
-            // Mientras se hace pinch sobre una foto del carrusel, la pantalla
-            // queda quieta (igual que iOS con scrollDisabled).
-            .verticalScroll(rememberScrollState(), enabled = !CarouselZoom.isZooming),
+        Modifier.weight(1f).fillMaxWidth(),
     ) {
         Spacer(Modifier.height(Spacing.sm))
 
         if (state.loadFailed) RetryRow(onRetry = { viewModel.load(force = true) })
-
-        // Confirmación pioneer — espejo del banner pioneerConfirmation (iOS)
-        val pioneerNote by matchingViewModel.pioneerConfirmation.collectAsState()
-        if (pioneerNote != null) {
-            Row(
-                Modifier
-                    .padding(horizontal = Spacing.edge)
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(Radius.md))
-                    .background(BuddyColor.Accent.copy(alpha = 0.10f))
-                    .border(1.dp, BuddyColor.Accent.copy(alpha = 0.3f), RoundedCornerShape(Radius.md))
-                    .clickable { matchingViewModel.clearPioneerConfirmation() }
-                    .padding(Spacing.md),
-            ) {
-                Text(pioneerNote!!, style = BuddyType.Footnote, color = BuddyColor.Ink)
-            }
-            Spacer(Modifier.height(Spacing.sm))
-        }
 
         // "Ahora en X" cuando el destino resuelto cambia: sin aviso el contenido
         // se reemplaza solo y se lee como un fallo, no como el Home siguiéndote.
@@ -213,8 +203,14 @@ fun InicioScreen(
         // ── Composer (con o sin trip — mismo layout, distinto destino) ─────
         // Box: el loader flota centrado sobre el composer dimmeado mientras la
         // intención se procesa (pioneer: trip + solicitud) — paridad con iOS.
-        Box {
-        Column(Modifier.padding(horizontal = Spacing.edge).alpha(if (isFindingBuddy) 0.5f else 1f)) {
+        // weight(1f): el composer ocupa TODO el espacio libre que dejan los
+        // banners de arriba — espejo de .frame(maxHeight: .infinity) (iOS).
+        // Sin esto quedaba un hueco en blanco entre el CTA y la tab bar.
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+        Column(
+            Modifier.fillMaxHeight().padding(horizontal = Spacing.edge)
+                .alpha(if (isFindingBuddy) 0.5f else 1f),
+        ) {
             val effectiveContext = state.effectiveHomeContext
             // El trip seleccionado ES el que tiene el match activo — con 2+
             // trips vivos, uno puede no tener buddy asignado (ej: Villa Rica
@@ -287,6 +283,7 @@ fun InicioScreen(
                     state.activeMatchId?.let { onOpenChat(it, null) } ?: onOpenConexiones()
                 },
                 onStartConversation = onStartConversation,
+                modifier = Modifier.fillMaxHeight(),
             )
 
             // "Consultar en X" abre la conversación a PANTALLA COMPLETA — la
@@ -332,26 +329,53 @@ fun InicioScreen(
         }
         }
 
-        Spacer(Modifier.height(4.dp))
+        // Comunidad Viva (recent help + pulse) se quitó: el Home vuelve a ser
+        // una sola pantalla sin scroll, espejo de iOS. "Historias de
+        // viajeros" ya vivía en el tab Trips, debajo del trip propio.
+        Spacer(Modifier.height(Spacing.md))
+    }
+    }
 
-        // ── Comunidad viva (recent help + pulse) ────────────────────────
-        CommunityLiveSection(
-            communityPulse = state.communityPulse,
-            isLoading = state.isLoadingCommunity,
-            formatTimeAgo = viewModel::formatTimeAgo,
-            // Reutiliza la misma vía que el carrusel: quien contiene la
-            // pantalla sabe abrir el mapa de un destino, el Home no.
-            onOpenDestination = { destinationId, nombre ->
-                onOpenPlace(ApiPlaceCard(id = destinationId, name = nombre,
-                                         destinationId = destinationId,
-                                         destinationName = nombre))
-            },
-            onOpenProfile = onOpenProfile,
-            modifier = Modifier.padding(bottom = Spacing.lg),
-        )
-
-        // "Historias de viajeros" se mudó al tab Trips, debajo del trip propio.
-        Spacer(Modifier.height(100.dp))
+    // Confirmación pioneer — toast flotante abajo, espejo exacto de
+    // pioneerConfirmation (iOS): aparece con la solicitud ya registrada en
+    // silencio, se lee sola y se va — no exige que el usuario haga nada.
+    val pioneerNote by matchingViewModel.pioneerConfirmation.collectAsState()
+    androidx.compose.animation.AnimatedVisibility(
+        visible = pioneerNote != null,
+        enter = androidx.compose.animation.slideInVertically { it } + androidx.compose.animation.fadeIn(),
+        exit = androidx.compose.animation.slideOutVertically { it } + androidx.compose.animation.fadeOut(),
+        modifier = Modifier.align(Alignment.BottomCenter),
+    ) {
+        val msg = pioneerNote
+        if (msg != null) {
+            LaunchedEffect(msg) {
+                kotlinx.coroutines.delay(4000)
+                matchingViewModel.clearPioneerConfirmation()
+            }
+            Row(
+                Modifier
+                    .padding(horizontal = Spacing.edge)
+                    .padding(bottom = Spacing.md)
+                    .shadow(8.dp, RoundedCornerShape(Radius.md))
+                    .clip(RoundedCornerShape(Radius.md))
+                    .background(BuddyColor.Surface)
+                    .padding(Spacing.md),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+            ) {
+                Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = BuddyColor.Brand)
+                Text(msg, style = BuddyType.Footnote, color = BuddyColor.Ink, modifier = Modifier.weight(1f))
+                androidx.compose.material3.IconButton(
+                    onClick = { matchingViewModel.clearPioneerConfirmation() },
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        Icons.Filled.Close, contentDescription = "Cerrar",
+                        tint = BuddyColor.InkMuted, modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
+        }
     }
     }
 
@@ -452,6 +476,7 @@ private fun CategoryPicker(
     /** Tocar el nombre del lugar abre su mapa — espejo de onDestinationTap
      *  (iOS). Nulo cuando no hay destino resuelto: sin guía no hay gesto. */
     onDestinationTap: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
 ) {
     val noBuddies = activeBuddyName == null &&
         (communityContext?.let { it.buddies <= 0 && it.totalBuddies <= 0 } ?: true)
@@ -462,7 +487,7 @@ private fun CategoryPicker(
     // llega deben ocupar el mismo espacio.
     val showsCarousel = exploreCards.isNotEmpty() || isLoadingExplore
 
-    Column {
+    Column(modifier) {
         if (topSpacing) Spacer(Modifier.height(Spacing.md))
         // Hero heading
         Text(
@@ -480,29 +505,11 @@ private fun CategoryPicker(
         Text(
             buildAnnotatedString {
                 if (showsCarousel) {
-                    // El núcleo es la CERCANÍA; la ciudad queda como referencia.
+                    // Sin la ciudad: ahora la dice el botón ("Consultar en
+                    // Breña"), que es donde el destino importa — y no como una
+                    // coletilla del subtítulo. Espejo exacto de iOS.
                     withStyle(SpanStyle(color = BuddyColor.InkMuted)) {
-                        append("Lugares cerca de ti que recomiendan los buddies")
-                        if (destinationName == null) append(".") else append(" · ")
-                    }
-                    if (destinationName != null) {
-                        // El nombre del lugar, subrayado, abre su mapa (iOS igual).
-                        val tap = onDestinationTap
-                        if (tap != null) {
-                            withLink(
-                                androidx.compose.ui.text.LinkAnnotation.Clickable(
-                                    tag = "destino",
-                                    styles = androidx.compose.ui.text.TextLinkStyles(
-                                        style = SpanStyle(
-                                            color = BuddyColor.InkMuted,
-                                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
-                                        ),
-                                    ),
-                                ) { tap() },
-                            ) { append(destinationName) }
-                        } else {
-                            withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append(destinationName) }
-                        }
+                        append("Recomendado por buddies.")
                     }
                 } else {
                     withStyle(SpanStyle(color = BuddyColor.InkMuted)) { append("Elige el tema de tu consulta. Te conectaremos con una persona que conozca") }
@@ -544,8 +551,8 @@ private fun CategoryPicker(
         Spacer(Modifier.height(Spacing.md))
 
         if (showsCarousel) {
-            // Sangra hasta el borde de la pantalla, como en iOS: el peek
-            // lateral de las cards vecinas es parte del efecto.
+            // Pager vertical de ancho completo — ya no sangra al borde: sin
+            // peek lateral no hace falta invadir el padding del Home.
             ExploreCarousel(
                 cards = exploreCards,
                 isSkeleton = exploreCards.isEmpty() && isLoadingExplore,
@@ -553,32 +560,17 @@ private fun CategoryPicker(
                 userLng = userLng,
                 nearestId = nearestSpotId,
                 onOpenPlace = onOpenPlace,
-                modifier = Modifier.sangraLateral(Spacing.edge),
+                // weight(1f): el carrusel es lo único elástico, absorbe el
+                // espacio que sobra en la pantalla — espejo de iOS, donde la
+                // foto ocupa TODO el visor. sangraLateral: el composer entero
+                // tiene padding horizontal (para la cabecera y el subtítulo)
+                // — sin cancelarlo la foto quedaba inset, con un borde en
+                // blanco a los lados que iOS no tiene.
+                modifier = Modifier.weight(1f).sangraLateral(Spacing.edge),
             )
-            Spacer(Modifier.height(6.dp))
-            // La bisagra entre las fotos y el CTA: nombra la ciudad y la
-            // disponibilidad en la misma frase, para encadenar lugar → persona
-            // → consulta.
-            // Centrada bajo la tarjeta del medio, con el punto de "en línea":
-            // se lee como el estado de la comunidad, no como una nota al pie.
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(if ((communityContext?.buddies ?: 0) > 0) BuddyColor.Accent else BuddyColor.InkFaint),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    exploreAvailabilityText(communityContext, destinationName),
-                    style = BuddyType.Footnote,
-                    color = BuddyColor.Ink,
-                )
-            }
+            // Sin la fila de disponibilidad debajo del carrusel: iOS ya no la
+            // pinta (exploreAvailabilityText quedó sin uso ahí) — el estado de
+            // la comunidad lo cuenta el botón, no una línea aparte.
             Spacer(Modifier.height(16.dp))
         }
 

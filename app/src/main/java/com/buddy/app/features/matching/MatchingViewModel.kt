@@ -89,16 +89,16 @@ class MatchingViewModel @Inject constructor(
         viewModelScope.launch {
             _isPioneerRegistering.value = true
             try {
-                val journey = when {
-                    destinationId != null -> tripRepo.ensureActiveTrip(destinationId)
-                    lat != null && lng != null -> tripRepo.ensureActiveTripForGps(lat, lng)
-                    else -> return@launch
-                }
+                if (destinationId == null && (lat == null || lng == null)) return@launch
+                // Sin Journey: journeyId es opcional en createHelpRequest, y acá
+                // no hace falta uno — pioneer es "registra la solicitud y ya",
+                // no "crea un trip". Antes esto llamaba ensureActiveTrip(...) y
+                // dejaba un trip fantasma en el tab Trips por cada pregunta
+                // pioneer, cosa que nadie pidió.
                 try {
                     repo.createHelpRequest(
-                        destinationId = journey.destination?.id ?: journey.destinationId,
+                        destinationId = destinationId,
                         category = category,
-                        journeyId = journey.id,
                         lat = lat, lng = lng,
                     )
                 } catch (e: com.buddy.app.features.matching.data.ActiveRequestExists) {
@@ -108,16 +108,15 @@ class MatchingViewModel @Inject constructor(
                     Log.d(TAG, "pioneer 409 → cancelando huérfana ${orphan.take(8)} y reintentando")
                     repo.cancelRequest(orphan)
                     repo.createHelpRequest(
-                        destinationId = journey.destination?.id ?: journey.destinationId,
+                        destinationId = destinationId,
                         category = category,
-                        journeyId = journey.id,
                         lat = lat, lng = lng,
                     )
                 }
                 val city = cityName ?: "tu zona"
                 _pioneerConfirmation.value =
                     "Registramos tu solicitud en $city. Te avisaremos cuando haya un buddy disponible."
-                delay(500)   // igual que el asyncAfter(0.5) de iOS
+                delay(500)   // deja un instante para que se lea "Registramos tu solicitud…" antes de cerrar
                 onDone()
             } catch (e: Exception) {
                 Log.e(TAG, "pioneer flow failed", e)
