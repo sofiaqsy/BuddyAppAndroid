@@ -37,8 +37,8 @@ android {
         // 9: Home a una sola pantalla (carrusel vertical infinito, CTA con
         // destino), bug del botón "Cancelar solicitud" y de solicitudes
         // huérfanas al cerrar rápido — espejo de iOS 1.1.2.
-        versionCode = 12
-        versionName = "1.1.3"
+        versionCode = 13
+        versionName = "1.1.4"
 
         buildConfigField("String", "API_BASE_URL", "\"https://buddy-core-504b393f8333.herokuapp.com/v1/\"")
         // Dominio público de los enlaces que se comparten fuera de la app. NO es

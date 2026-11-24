@@ -204,7 +204,7 @@ private fun LocationContext(city: String?, onRequestPermission: () -> Unit) {
         ) {
             Icon(Icons.Filled.MyLocation, contentDescription = null, Modifier.size(13.dp), tint = BuddyColor.Brand)
             Text(
-                "Activa tu ubicación para conectarte con ayuda cerca",
+                "Activa tu ubicación para ver lugares cerca de ti",
                 style = BuddyType.Caption1, color = BuddyColor.Brand,
             )
             Icon(

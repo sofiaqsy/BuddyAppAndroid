@@ -127,7 +127,14 @@ fun InicioRows(
     androidx.compose.runtime.LaunchedEffect(cards.isNotEmpty()) {
         if (cards.isNotEmpty()) com.buddy.app.core.perf.PerfLog.sinceStartOnce("inicio-con-lugares")
     }
-    androidx.compose.runtime.LaunchedEffect(destinationId) { viewModel.loadHero(destinationId) }
+    // Sin ubicación no hay destino resuelto: se usa el de la mayoría de los lugares (Villa Rica).
+    val destinoMayoria = remember(cards) {
+        cards.mapNotNull { it.destinationId }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+    }
+    // Un destino sin lugares en la lista (p. ej. el de un trip viejo) no sirve de portada.
+    val destinoConLugares = destinationId?.takeIf { id -> cards.isEmpty() || cards.any { it.destinationId == id } }
+    val destino = destinoConLugares ?: destinoMayoria
+    androidx.compose.runtime.LaunchedEffect(destino) { viewModel.loadHero(destino); viewModel.loadTouristPlaces(destino) }
 
     // "Ver todo" de una categoría: lista a pantalla completa (iOS HomeCategoryListView).
     var openCategory by rememberSaveable { mutableStateOf<String?>(null) }
@@ -169,7 +176,7 @@ fun InicioRows(
             modifier = Modifier.fillMaxSize().testTag("inicioList"),
         ) {
             item(key = "hero") {
-                Hero(topInset, placeName ?: ui.hero?.name ?: "Descubre", ui.hero?.slogan, ui.hero?.coverUrl,
+                Hero(topInset, (if (destinoConLugares != null) placeName else null) ?: ui.hero?.name ?: "Descubre", ui.hero?.slogan, ui.hero?.coverUrl,
                      ui.query, viewModel::onQueryChange, onSubmit = { focus.clearFocus() })
             }
             if (ui.query.isNotEmpty()) {
@@ -188,6 +195,12 @@ fun InicioRows(
                     }
                     if (ui.localProducts.isNotEmpty()) item(key = "products") {
                         ProductsRow(ui.localProducts, ui.reshuffleToken) { onOpenPlace(it.card) }
+                    }
+                    // Lugares turísticos sin dueño, después de los productos (Keyla, 24 Nov 2026).
+                    if (ui.touristPlaces.isNotEmpty()) item(key = "tourist") {
+                        PlaceRow("Lugares turísticos", "Cataratas, miradores y naturaleza",
+                                 InicioRowsLogic.rotated(ui.touristPlaces, ui.reshuffleToken), large = false,
+                                 onSeeAll = null, onOpenPlace = onOpenPlace, tall = true)
                     }
                     item(key = "more") {
                         PlaceRow("Más para descubrir", "Una selección de lugares de Villa Rica",

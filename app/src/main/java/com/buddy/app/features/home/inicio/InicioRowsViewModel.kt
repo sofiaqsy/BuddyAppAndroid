@@ -41,6 +41,8 @@ class InicioRowsViewModel @Inject constructor(
         val reshuffleToken: Int = 0,
         /** Fila "Productos locales": una tarjeta por presentación, tiendas intercaladas. */
         val localProducts: List<LocalProductTile> = emptyList(),
+        /** "Lugares turísticos": lugares públicos de la guía del destino (iOS, 24 Nov 2026). */
+        val touristPlaces: List<com.buddy.app.core.data.model.ApiPlaceCard> = emptyList(),
     )
 
     /** Un producto en una presentación, con el lugar que lo vende. */
@@ -106,6 +108,31 @@ class InicioRowsViewModel @Inject constructor(
             val tiles = InicioRowsLogic.interleaveByStore(perStore, storeOf = { it.card.id })
             _state.update { it.copy(localProducts = tiles) }
         }
+    }
+
+    /**
+     * Lugares turísticos (cataratas, miradores, plaza): salen de la guía del
+     * destino, no del feed, porque el feed solo trae lugares con fotos de
+     * viajeros y las cataratas no tienen (igual que iOS).
+     */
+    fun loadTouristPlaces(destinationId: String?) {
+        if (destinationId == null) return
+        viewModelScope.launch {
+            val spots = runCatching { mapApi.guideSpots(destinationId).spots }.getOrNull() ?: return@launch
+            val cards = spots.filter { it.categoryName in TOURIST_CATEGORIES }.map { g ->
+                com.buddy.app.core.data.model.ApiPlaceCard(
+                    id = g.id, name = g.name, destinationId = destinationId, destinationName = _state.value.hero?.name,
+                    lat = g.lat, lng = g.lng, coverUrl = g.coverUrl, coverUrls = g.coverUrl?.let { listOf(it) },
+                    category = g.categoryName, photoCount = if (g.coverUrl == null) 0 else 1,
+                )
+            }
+            _state.update { it.copy(touristPlaces = cards) }
+        }
+    }
+
+    companion object {
+        /** Categorías de lugares públicos, sin un negocio detrás. */
+        val TOURIST_CATEGORIES = setOf("Naturaleza", "Miradores", "Plaza y centro")
     }
 
     /** Re-tap de Inicio: otro orden neutral. */

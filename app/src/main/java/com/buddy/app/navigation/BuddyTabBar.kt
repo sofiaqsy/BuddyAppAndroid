@@ -34,6 +34,8 @@ import com.buddy.app.core.designsystem.BuddyType
 @Composable
 fun BuddyTabBar(
     selected: AppTab,
+    /** "Negocio" cuando hay una cuenta de negocio activa. */
+    yoLabel: String? = null,
     unreadChats: Int,
     onSelect: (AppTab) -> Unit,
     onReselect: (AppTab) -> Unit,
@@ -50,14 +52,17 @@ fun BuddyTabBar(
             AppTab.entries.forEach { tab ->
                 val active = tab == selected
                 val badge = if (tab == AppTab.Conexiones) unreadChats else 0
+                // Cada tab ocupa un cuarto del ancho: con letra grande (130 %) y
+                // zoom de pantalla, el padding fijo dejaba "Yo" fuera (Keyla, 24 Nov 2026).
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
+                        .weight(1f)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = ripple(bounded = false, color = BuddyColor.Brand),
                         ) { if (active) onReselect(tab) else onSelect(tab) }
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                        .padding(horizontal = 2.dp, vertical = 4.dp),
                 ) {
                     BadgedBox(badge = {
                         if (badge > 0) Badge(containerColor = BuddyColor.ErrorRed) { Text("$badge") }
@@ -68,11 +73,22 @@ fun BuddyTabBar(
                             tint = if (active) BuddyColor.Brand else BuddyColor.TabBarInactive,
                         )
                     }
+                    // Con letra muy grande las etiquetas crecen hasta 1.1x como
+                    // máximo, para que "Comunidad" y "Conexiones" quepan enteras.
+                    val d = androidx.compose.ui.platform.LocalDensity.current
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        androidx.compose.ui.platform.LocalDensity provides
+                            androidx.compose.ui.unit.Density(d.density, d.fontScale.coerceAtMost(1.1f)),
+                    ) {
                     Text(
-                        text = stringResource(tab.label),
+                        text = if (tab == AppTab.Yo && yoLabel != null) yoLabel else stringResource(tab.label),
                         style = BuddyType.Caption1,
                         color = if (active) BuddyColor.Brand else BuddyColor.TabBarInactive,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
+                    }
                 }
             }
         }

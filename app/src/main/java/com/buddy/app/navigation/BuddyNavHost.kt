@@ -179,10 +179,16 @@ fun BuddyRoot() {
     // Box y no dos hermanos sueltos: el perfil se dibuja ENCIMA del Scaffold,
     // tapando también la barra de tabs — es una pantalla, no un tab más.
     Box(Modifier.fillMaxSize()) {
+    // Cuenta de negocio activa: el tab Yo pasa a ser "Negocio" (Android fase 2, 24 Nov 2026).
+    val appCtx = androidx.compose.ui.platform.LocalContext.current
+    val activeBizId by com.buddy.app.features.business.BusinessStore.activeFarmId.collectAsState()
+    val bizList by com.buddy.app.features.business.BusinessStore.businesses.collectAsState()
+    val activeBusiness = bizList.firstOrNull { it.farmId != null && it.farmId == activeBizId }
     Scaffold(
         containerColor = BuddyColor.Canvas,
         bottomBar = {
             BuddyTabBar(
+                yoLabel = if (activeBusiness != null) "Negocio" else null,
                 selected = selectedTab,
                 unreadChats = conexionesState.totalUnread,
                 onSelect = { selectedTab = it },
@@ -264,7 +270,30 @@ fun BuddyRoot() {
             )
             // Sin trips en Conexiones (Keyla, 23 Nov 2026): el botón lleva a Inicio.
             AppTab.Conexiones -> ConexionesScreen(modifier, onOpenTrips = { selectedTab = AppTab.Inicio })
-            AppTab.Yo -> YoScreen(
+            AppTab.Yo -> if (activeBusiness != null) com.buddy.app.features.business.BusinessHomeScreen(
+                activeBusiness,
+                modifier,
+                onSwitchToPersonal = { com.buddy.app.features.business.BusinessStore.activate(appCtx, null) },
+                onSignOut = {
+                    com.buddy.app.features.business.FincasAuth.signOut(appCtx)
+                    com.buddy.app.features.business.BusinessStore.clear(appCtx)
+                },
+                // Tocar una ubicación abre el lugar en el mapa, como desde Inicio (iOS).
+                onOpenPlace = { card ->
+                    val destId = card.destinationId
+                    if (destId != null) {
+                        mapSpotId = card.id
+                        mapJourney = com.buddy.app.core.data.model.ApiJourney(
+                            id = card.id, title = card.destinationName ?: card.name, status = "active",
+                            destination = com.buddy.app.core.data.model.ApiDestinationRef(
+                                id = destId, name = card.destinationName ?: card.name,
+                                city = card.destinationName ?: card.name, lat = card.lat, lng = card.lng,
+                            ),
+                            destinationId = destId,
+                        )
+                    }
+                },
+            ) else YoScreen(
                 modifier,
                 onOpenTrips = { misTripsOpen = true },
                 onOpenPlace = { card ->

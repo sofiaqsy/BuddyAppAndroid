@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.heading
@@ -447,6 +448,16 @@ private fun AccountMenu(onLogout: () -> Unit, onDelete: () -> Unit) {
             Icon(Icons.Filled.MoreHoriz, contentDescription = "Opciones de cuenta", tint = BuddyColor.InkMuted)
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            // Negocios vinculados en este teléfono (Android fase 2, 24 Nov 2026).
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            val bizs by com.buddy.app.features.business.BusinessStore.businesses.collectAsState()
+            bizs.filter { it.farmId != null }.forEach { b ->
+                DropdownMenuItem(
+                    text = { Text("Cambiar a ${b.name}", style = BuddyType.Body, color = BuddyColor.Ink) },
+                    leadingIcon = { Icon(Icons.Outlined.Storefront, null, tint = BuddyColor.Ink) },
+                    onClick = { expanded = false; com.buddy.app.features.business.BusinessStore.activate(ctx, b.farmId) },
+                )
+            }
             DropdownMenuItem(
                 text = { Text("Cerrar sesión", style = BuddyType.Body, color = BuddyColor.Ink) },
                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.Logout, null, tint = BuddyColor.Ink) },

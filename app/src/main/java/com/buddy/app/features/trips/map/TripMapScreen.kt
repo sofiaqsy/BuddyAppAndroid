@@ -1,5 +1,7 @@
 package com.buddy.app.features.trips.map
 
+import okhttp3.MediaType.Companion.toMediaType
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -27,6 +29,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Share
@@ -37,6 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -195,6 +200,8 @@ fun TripMapScreen(
      *  referencia que el destinatario tendría que resolver. */
     var compartiendo by remember { mutableStateOf<com.buddy.app.core.data.model.ChatCard.Place?>(null) }
     var mapRef by remember { mutableStateOf<MapView?>(null) }
+    // Punto azul de "tu ubicación" (iOS, 24 Nov 2026).
+    var myLoc by remember { mutableStateOf<org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     /** Buddy cuyo perfil se está mirando. A pantalla completa y por encima del
      *  mapa: es otra pantalla, no una capa más de esta. */
@@ -227,8 +234,10 @@ fun TripMapScreen(
     // Galería y buddies se piden al ABRIR la ficha, no al cargar el mapa: son
     // decenas de fotos por lugar y casi ninguna se llega a mirar.
     var fotos by remember { mutableStateOf<List<FotoDeLugar>>(emptyList()) }
+    /** Sube al cambiar: el dueño añadió una foto y la galería se vuelve a pedir. */
+    var fotosToken by remember { mutableStateOf(0) }
     var isLoadingFotos by remember { mutableStateOf(false) }
-    LaunchedEffect(selectedSpotId) {
+    LaunchedEffect(selectedSpotId, fotosToken) {
         val id = selectedSpotId ?: return@LaunchedEffect
         fotos = emptyList()
         isLoadingFotos = true
@@ -254,6 +263,35 @@ fun TripMapScreen(
     var chatTarget by remember { mutableStateOf<com.buddy.app.features.businesschat.BusinessChatTarget?>(null) }
     // Foto de producto abierta en el visor (todas las del lugar, en orden).
     var productoAmpliado by remember { mutableStateOf<String?>(null) }
+    val ownerSpots by com.buddy.app.features.business.OwnerSpots.map.collectAsState(initial = emptyMap())
+    var editingProduct by remember { mutableStateOf<Pair<String, com.buddy.app.core.data.model.FincasProduct?>?>(null) }
+    val ctxOwner = androidx.compose.ui.platform.LocalContext.current
+    val businessApi = remember { dagger.hilt.android.EntryPointAccessors.fromApplication(ctxOwner.applicationContext,
+        com.buddy.app.features.business.BusinessEntryPoint::class.java).businessApi() }
+    var ownerUpload by remember { mutableStateOf<Pair<String, String>?>(null) }   // spotId, farmId
+    /** Fotos del dueño del lugar abierto (id, url, posición): para "Quitar foto" y "Usar como portada". */
+    var ownerPhotos by remember { mutableStateOf<List<com.buddy.app.features.business.OwnerPhoto>>(emptyList()) }
+    LaunchedEffect(selectedSpotId, fotosToken, ownerSpots) {
+        val id = selectedSpotId
+        ownerPhotos = if (id != null && ownerSpots.containsKey(id.lowercase()))
+            runCatching { businessApi.ownerPhotos(id).photos.sortedBy { it.position } }.getOrDefault(emptyList()) else emptyList()
+    }
+    val photoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
+        val target = ownerUpload
+        if (uri != null && target != null) scope.launch {
+            runCatching {
+                val jpeg = withContext(Dispatchers.IO) { com.buddy.app.features.business.Jpeg.from(ctxOwner, uri) }
+                val body = okhttp3.RequestBody.create("image/jpeg".toMediaType(), jpeg)
+                businessApi.uploadOwnerPhoto(target.first,
+                    okhttp3.MultipartBody.Part.createFormData("photo", "foto.jpg", body),
+                    okhttp3.RequestBody.create(null, target.second))
+            }.onSuccess { fotosToken++ }
+             .onFailure { android.widget.Toast.makeText(ctxOwner, "No pudimos subir la foto. Intenta de nuevo.", android.widget.Toast.LENGTH_SHORT).show() }
+        }
+    }
+    /** Producto que la ficha muestra primero: el visor sigue el mismo orden. */
+    var productoPrimero by remember { mutableStateOf<String?>(null) }
 
     var buddies by remember { mutableStateOf<List<ApiPlaceBuddy>>(emptyList()) }
     var isLoadingBuddies by remember { mutableStateOf(true) }
@@ -285,7 +323,7 @@ fun TripMapScreen(
     val collapsedDp = (if (selectedSpot != null) PanelHeight else ListPanelHeight) + insetInferior
     val expandedDp = screenH + insetInferior - topInset - 24.dp
     LaunchedEffect(collapsedDp, expandedDp) {
-        with(density) { sheet.setBounds(collapsedDp.toPx(), expandedDp.toPx()) }
+        with(density) { sheet.setBounds(collapsedDp.toPx(), expandedDp.toPx(), (PeekHeight + insetInferior).toPx()) }
     }
     // Cambiar de lugar (o volver a la lista) cierra el panel abierto.
     LaunchedEffect(selectedSpotId) { if (sheet.expanded) sheet.expand(false) }
@@ -329,11 +367,13 @@ fun TripMapScreen(
     // Como iOS: cada presentación con TODAS sus fotos, una tras otra; arriba el
     // nombre y "S/ 20 · 250 g · n de m". Abre en la foto que se tocó.
     productoAmpliado?.let { url ->
-        val entries = products.flatMap { p -> p.entries().map { p to it } }
-        val groups = entries.map { (p, pr) ->
-            val own = pr?.let { listOfNotNull(*it.photos.orEmpty().map { f -> f.url }.toTypedArray(), it.photoUrl) }.orEmpty()
-            own.filter { it.isNotEmpty() }.distinct().ifEmpty { listOfNotNull(p.coverFor(pr)) }
+        val entries = products.flatMap { p -> p.entries().map { p to it } }.let { all ->
+            // Mismo orden que el panel: el producto tocado en Inicio va primero.
+            val i = all.indexOfFirst { (p, pr) -> "${p.id}-${pr?.id ?: ""}" == productoPrimero }
+            if (i <= 0) all else listOf(all[i]) + all.filterIndexed { j, _ -> j != i }
         }
+        // Una foto por tarjeta, la misma del panel (Keyla, 24 Nov 2026).
+        val groups = entries.map { (p, pr) -> listOfNotNull(p.coverFor(pr)) }
         val pages = com.buddy.app.core.designsystem.components.ViewerPages.make(groups).filter { it.url != null }
         com.buddy.app.core.designsystem.components.PhotoViewerDialog(
             pages = pages,
@@ -358,7 +398,7 @@ fun TripMapScreen(
         CompartirLugarSheet(card = tarjeta, onDismiss = { compartiendo = null })
     }
 
-    DisposableEffect(Unit) { onDispose { mapRef?.onDetach() } }
+    DisposableEffect(Unit) { onDispose { myLoc?.disableMyLocation(); mapRef?.onDetach() } }
 
     Box(Modifier.fillMaxSize().background(BuddyColor.Canvas)) {
         if (center != null) {
@@ -368,11 +408,35 @@ fun TripMapScreen(
                     Configuration.getInstance().userAgentValue = ctx.packageName
                     MapView(ctx).apply {
                         setTileSource(TileSourceFactory.MAPNIK)
+                        // Tonos suaves y cálidos, más cerca del mapa de iOS (Keyla, 24 Nov
+                        // 2026): baja la saturación del mapa estándar y lo aclara un poco.
+                        overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(
+                            android.graphics.ColorMatrix().apply {
+                                setSaturation(0.45f)
+                                postConcat(android.graphics.ColorMatrix(floatArrayOf(
+                                    0.92f, 0f, 0f, 0f, 22f,
+                                    0f, 0.92f, 0f, 0f, 20f,
+                                    0f, 0f, 0.90f, 0f, 12f,
+                                    0f, 0f, 0f, 1f, 0f)))
+                            }))
                         setMultiTouchControls(true)
                         zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
                         controller.setZoom(if (spots.isEmpty()) 15.0 else ZoomDestino)
                         controller.setCenter(center)
                         mapRef = this
+                        // Punto azul con aro blanco y halo, como el de iPhone.
+                        val provider = org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider(ctx).apply {
+                            addLocationSource(android.location.LocationManager.NETWORK_PROVIDER)
+                        }
+                        val dot = puntoAzul(ctx.resources.displayMetrics.density)
+                        val overlay = org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay(provider, this).apply {
+                            setPersonIcon(dot); setDirectionIcon(dot)
+                            setPersonAnchor(0.5f, 0.5f); setDirectionAnchor(0.5f, 0.5f)
+                            isDrawAccuracyEnabled = false
+                            enableMyLocation()
+                        }
+                        overlays.add(overlay)
+                        myLoc = overlay
                         // Al terminar de mover o hacer zoom (400 ms sin gestos):
                         // pedir lo que hay en pantalla. Cancela la petición
                         // anterior para que solo la última posición cuente.
@@ -452,7 +516,7 @@ fun TripMapScreen(
                             Marker(map).apply {
                                 position = GeoPoint(spot.lat, spot.lng)
                                 title = spot.name
-                                icon = pinDeLugar(map.context, spot.name, elegido)
+                                icon = pinDeLugar(map.context, spot.name, elegido, categoria = spot.categoryName)
                                 setAnchor(Marker.ANCHOR_CENTER, anclaVerticalDelPin(map.context, elegido))
                                 // Sin el globo de osmdroid: el nombre ya va en
                                 // el pin del elegido y la ficha de abajo cuenta
@@ -473,9 +537,31 @@ fun TripMapScreen(
                             },
                         )
                     }
+                    // El punto azul va encima de los pines (Keyla, 24 Nov 2026).
+                    myLoc?.let { map.overlays.remove(it); map.overlays.add(it) }
                     map.invalidate()
                 },
             )
+            // Botón "mi ubicación", siempre por encima del panel (iOS).
+            if (!sheet.expanded) Box(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = with(density) { sheet.height.value.toDp() } + 28.dp)
+                    .size(52.dp)
+                    .shadow(6.dp, RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFFFFFBF2))
+                    .clickable {
+                        myLoc?.myLocation?.let { mapRef?.controller?.animateTo(it, ZoomLugar, DuracionZoomMs) }
+                    }
+                    .semantics { contentDescription = "Ir a mi ubicación" },
+                contentAlignment = Alignment.Center,
+            ) {
+                androidx.compose.material3.Icon(
+                    androidx.compose.material.icons.Icons.Filled.Navigation, contentDescription = null,
+                    tint = Color.Black, modifier = Modifier.size(24.dp).graphicsLayer { rotationZ = 45f },
+                )
+            }
             // Con el panel abierto no hay mapa a la vista: el crédito se oculta.
             if (!sheet.expanded) Text(
                 "© OpenStreetMap",
@@ -596,12 +682,45 @@ fun TripMapScreen(
             ) { Box(Modifier.size(40.dp, 5.dp).clip(CircleShape).background(BuddyColor.Border)) }
             AnimatedContent(
                 targetState = selectedSpot,
+                // Mismo lugar = misma ficha, aunque llegue una copia nueva del lugar.
+                contentKey = { it?.id },
                 transitionSpec = {
                     fadeIn(tween(200)) togetherWith fadeOut(tween(150))
                 },
                 label = "panel",
             ) { spot ->
                 if (spot != null) {
+                    // ¿Es un lugar del negocio activo? Entonces los productos llevan lápiz.
+                    val ownerFarm = ownerSpots[spot.id.lowercase()]
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        LocalProductEdit provides ownerFarm?.let { farmId -> { prod: com.buddy.app.core.data.model.FincasProduct -> editingProduct = Pair(farmId, prod) } },
+                        LocalOwnerActions provides ownerFarm?.let { farmId ->
+                            com.buddy.app.features.business.OwnerActions(
+                                onAddProduct = { editingProduct = Pair(farmId, null) },
+                                ownerPhotoIds = ownerPhotos.associate { it.url to it.id },
+                                coverId = ownerPhotos.firstOrNull()?.id,
+                                onRemovePhoto = { photoId ->
+                                    scope.launch {
+                                        runCatching { businessApi.deleteOwnerPhoto(spot.id, photoId, farmId) }
+                                            .onSuccess { fotosToken++ }
+                                            .onFailure { android.widget.Toast.makeText(ctxOwner, "No pudimos quitar la foto.", android.widget.Toast.LENGTH_SHORT).show() }
+                                    }
+                                },
+                                onMakeCover = { photoId ->
+                                    scope.launch {
+                                        runCatching { businessApi.setOwnerCover(spot.id, photoId, com.buddy.app.features.business.ClaimBody(farmId)) }
+                                            .onSuccess { fotosToken++ }
+                                            .onFailure { android.widget.Toast.makeText(ctxOwner, "No pudimos cambiar la portada.", android.widget.Toast.LENGTH_SHORT).show() }
+                                    }
+                                },
+                                onAddPhoto = {
+                                    ownerUpload = spot.id to farmId
+                                    photoPicker.launch(androidx.activity.result.PickVisualMediaRequest(
+                                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                },
+                            )
+                        },
+                    ) {
                     PlaceGuideDetail(
                         spot = spot,
                         presenceText = presenceText,
@@ -612,6 +731,7 @@ fun TripMapScreen(
                         isLoadingProducts = isLoadingProducts,
                         expanded = sheet.expanded,
                         onOpenProductPhoto = { productoAmpliado = it },
+                        onFocus = { productoPrimero = it },
                         onAsk = { p, pr ->
                             val card = if (p == null) com.buddy.app.features.businesschat.BizCard(
                                 kind = "place", title = spot.name, subtitle = spot.categoryName, spotId = spot.id.lowercase())
@@ -636,6 +756,7 @@ fun TripMapScreen(
                         onNavigate = { navigationTarget = spot },
                         onOpenPhoto = { fotoAmpliada = it },
                     )
+                    }
                 } else {
                     RailDeLugares(
                         spots = spots,
@@ -654,6 +775,14 @@ fun TripMapScreen(
             }
         }
 
+        editingProduct?.let { (farm, prod) ->
+            com.buddy.app.features.business.ProductEditorScreen(farm, prod, Modifier.navigationBarsPadding()) { changed ->
+                editingProduct = null
+                if (changed) selectedSpot?.let { sp ->
+                    scope.launch { products = withContext(Dispatchers.IO) { viewModel.products(sp.id) } }
+                }
+            }
+        }
         chatTarget?.let { t ->
             com.buddy.app.features.businesschat.BusinessChatScreen(t, onClose = { chatTarget = null },
                 vm = androidx.hilt.navigation.compose.hiltViewModel(key = "biz-${t.spotId}-${t.card?.productId}"))
@@ -703,6 +832,8 @@ private val PanelHeight = 300.dp
 
 /** Cerrada, la lista mide lo justo para su título y dos tarjetas. */
 private val ListPanelHeight = 300.dp
+/** Alto mínimo (iOS, 24 Nov 2026): la barrita y el título con "Cómo llegar". */
+private val PeekHeight = 84.dp
 
 /**
  * ZOOM: LA CIUDAD Y LA CUADRA
@@ -812,4 +943,18 @@ private fun FotoAmpliada(foto: FotoDeLugar, onClose: () -> Unit) {
             }
         }
     }
+}
+
+/** Punto de "tu ubicación": halo azul claro, aro blanco y centro azul (iOS). */
+private fun puntoAzul(d: Float): android.graphics.Bitmap {
+    val size = (44 * d).toInt()
+    val bmp = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+    val c = android.graphics.Canvas(bmp)
+    val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    val r = size / 2f
+    p.color = 0x2E007AFF; c.drawCircle(r, r, r, p)
+    p.color = 0x40000000; c.drawCircle(r, r + d, 11 * d, p)
+    p.color = android.graphics.Color.WHITE; c.drawCircle(r, r, 11 * d, p)
+    p.color = 0xFF007AFF.toInt(); c.drawCircle(r, r, 8 * d, p)
+    return bmp
 }

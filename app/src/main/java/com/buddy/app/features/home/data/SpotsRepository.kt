@@ -75,12 +75,20 @@ class SpotsRepository @Inject constructor(
                 scope.async<Unit> {
                     _isLoading.value = true
                     try {
-                        val desdeBootstrap = bootstrap.datos("placeShares", paraLat = lat, paraLng = lng)
-                        val cards = if (desdeBootstrap != null) {
+                        // Sin ubicación: los lugares de Villa Rica, sin distancia, para
+                        // que Inicio muestre todo menos "Cerca de ti" (Keyla, 24 Nov 2026).
+                        val sinUbicacion = lat == null || lng == null
+                        val desdeBootstrap = if (sinUbicacion) null else bootstrap.datos("placeShares", paraLat = lat, paraLng = lng)
+                        val cards = if (sinUbicacion) {
+                            api.placeShares(limit = 30, lat = VILLA_RICA_LAT, lng = VILLA_RICA_LNG).items
+                                // Solo los de Villa Rica (no los de otra ciudad), y sin distancia.
+                                .filter { (it.distanceMeters ?: Int.MAX_VALUE) <= 30_000 }
+                                .map { it.copy(distanceMeters = null) }
+                        } else if (desdeBootstrap != null) {
                             Log.d(TAG, "🗂️ [spots] $reason: ← /home/bootstrap (sin red aparte)")
                             bootstrap.decodificar(desdeBootstrap, com.buddy.app.core.data.model.ApiPlaceCardsResponse.serializer()).items
                         } else {
-                            api.placeShares(limit = 12, lat = lat, lng = lng).items
+                            api.placeShares(limit = 30, lat = lat, lng = lng).items
                         }
                         if (gen != generation) {
                             Log.d(TAG, "🗂️ [spots] $reason: respuesta superada por una más nueva — descartada")
@@ -142,3 +150,7 @@ class SpotsRepository @Inject constructor(
         private const val COALESCE_METERS = 150.0
     }
 }
+
+/** Centro de Villa Rica: se usa solo para pedir los lugares cuando no hay ubicación. */
+private const val VILLA_RICA_LAT = -10.7351432
+private const val VILLA_RICA_LNG = -75.2676019

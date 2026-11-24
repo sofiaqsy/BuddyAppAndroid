@@ -35,6 +35,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Invitación a un negocio: buddyvr://unirse/<código> (24 Nov 2026) -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="buddyvr" android:host="unirse" />
+            </intent-filter>
         </activity>
 
         <!-- Firebase Messaging Service -->

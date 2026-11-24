@@ -34,6 +34,8 @@ fun pinDeLugar(
      *  de "Buscar en el mapa" lo pide siempre: ahí el nombre ES la pista para
      *  saber si el lugar ya existe. */
     conNombre: Boolean = seleccionado,
+    /** Categoría del lugar: dibuja su icono, como iOS (Keyla, 24 Nov 2026). */
+    categoria: String? = null,
 ): Drawable {
     val d = contexto.resources.displayMetrics.density
     fun px(dp: Float) = dp * d
@@ -73,17 +75,21 @@ fun pinDeLugar(
     canvas.drawCircle(cx, cy, radio, tinta)
     tinta.clearShadowLayer()
 
-    tinta.color = if (seleccionado) ACENTO else ACENTO_TENUE
+    // Elegido: aro terracota grueso, como iOS. Los demás: aro tenue.
+    tinta.color = if (seleccionado) TERRACOTA else BORDE_TENUE
     tinta.style = Paint.Style.STROKE
-    tinta.strokeWidth = borde
+    tinta.strokeWidth = if (seleccionado) px(3f) else borde
     canvas.drawCircle(cx, cy, radio, tinta)
 
-    // Punto central en vez del glifo de categoría de iOS: Android no tiene ese
-    // catálogo de iconos todavía, y un icono equivocado dice algo falso del
-    // lugar mientras que un punto no dice nada.
-    tinta.color = ACENTO
-    tinta.style = Paint.Style.FILL
-    canvas.drawCircle(cx, cy, px(if (seleccionado) 5.5f else 4.5f), tinta)
+    // Icono de la categoría (los mismos de Inicio). Sin categoría, un punto.
+    if (categoria != null) {
+        dibujarIcono(canvas, com.buddy.app.features.home.inicio.categoryIcon(categoria),
+            cx, cy, px(if (seleccionado) 20f else 17f), BOSQUE)
+    } else {
+        tinta.color = ACENTO
+        tinta.style = Paint.Style.FILL
+        canvas.drawCircle(cx, cy, px(if (seleccionado) 5.5f else 4.5f), tinta)
+    }
 
     if (texto != null) {
         val arriba = cy + diametro / 2f + separacion
@@ -92,6 +98,7 @@ fun pinDeLugar(
             cx + anchoTexto / 2f + px(7f), arriba + altoEtiqueta,
         )
         tinta.color = BLANCO
+        tinta.style = Paint.Style.FILL   // venía en STROKE del aro: la etiqueta salía hueca
         tinta.setShadowLayer(px(3f), 0f, px(1f), 0x28000000)
         canvas.drawRoundRect(cápsula, altoEtiqueta / 2f, altoEtiqueta / 2f, tinta)
         tinta.clearShadowLayer()
@@ -123,6 +130,33 @@ private fun recortar(texto: String, pintura: Paint, maxAncho: Float): String {
 }
 
 private const val BLANCO = 0xFFFFFFFF.toInt()
+private const val TERRACOTA = 0xFFC87950.toInt()
+private const val BOSQUE = 0xFF2F4A3E.toInt()
+private const val BORDE_TENUE = 0x22000000
 private const val TINTA = 0xFF2B1C18.toInt()
 private const val ACENTO = 0xFF6F9885.toInt()
 private const val ACENTO_TENUE = 0x4D6F9885
+
+/** Pinta un icono de Material (ImageVector) en un Canvas de Android. */
+private fun dibujarIcono(canvas: Canvas, icono: androidx.compose.ui.graphics.vector.ImageVector,
+                         cx: Float, cy: Float, lado: Float, color: Int) {
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.color = color; style = Paint.Style.FILL }
+    val escala = lado / icono.viewportWidth
+    canvas.save()
+    canvas.translate(cx - lado / 2f, cy - lado / 2f)
+    canvas.scale(escala, escala)
+    fun recorrer(g: androidx.compose.ui.graphics.vector.VectorGroup) {
+        for (n in g) when (n) {
+            is androidx.compose.ui.graphics.vector.VectorPath -> {
+                val path = androidx.compose.ui.graphics.vector.PathParser().addPathNodes(n.pathData).toPath()
+                    .let { (it as androidx.compose.ui.graphics.AndroidPath).internalPath }
+                path.fillType = if (n.pathFillType == androidx.compose.ui.graphics.PathFillType.EvenOdd)
+                    android.graphics.Path.FillType.EVEN_ODD else android.graphics.Path.FillType.WINDING
+                canvas.drawPath(path, paint)
+            }
+            is androidx.compose.ui.graphics.vector.VectorGroup -> recorrer(n)
+        }
+    }
+    recorrer(icono.root)
+    canvas.restore()
+}

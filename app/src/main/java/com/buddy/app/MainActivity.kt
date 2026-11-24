@@ -7,6 +7,8 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.activity.enableEdgeToEdge
 import androidx.core.app.ActivityCompat
 import com.buddy.app.core.data.PushService
@@ -42,6 +44,8 @@ class MainActivity : ComponentActivity() {
         }
 
         handleNotificationIntent(intent)
+        com.buddy.app.features.business.JoinLinks.handle(intent?.data)
+        com.buddy.app.features.business.BusinessStore.load(this)
 
         setContent {
             BuddyTheme {
@@ -49,6 +53,14 @@ class MainActivity : ComponentActivity() {
                     BuddyRoot()
                     // El visor de fotos, encima de todo y en la misma ventana.
                     com.buddy.app.core.designsystem.components.PhotoOverlayHost()
+                    // Enlace de invitación a un negocio: encima de todo.
+                    val joinCode by com.buddy.app.features.business.JoinLinks.pending
+                        .collectAsState()
+                    joinCode?.let { code ->
+                        com.buddy.app.features.business.JoinBusinessScreen(code) {
+                            com.buddy.app.features.business.JoinLinks.pending.value = null
+                        }
+                    }
                 }
             }
         }
@@ -58,6 +70,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleNotificationIntent(intent)
+        com.buddy.app.features.business.JoinLinks.handle(intent.data)
     }
 
     /** Tap en una notificación push → deja el tab destino para que BuddyRoot lo aplique. */

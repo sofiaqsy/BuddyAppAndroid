@@ -29,31 +29,44 @@ class PanelSheet(private val scope: CoroutineScope, private val thresholdPx: Flo
     var minPx by mutableStateOf(0f); private set
     var maxPx by mutableStateOf(0f); private set
     var expanded by mutableStateOf(false); private set
+    /** Tercer alto, abajo del todo: solo el título, para ver el mapa (iOS, 24 Nov 2026). */
+    var minimized by mutableStateOf(false); private set
+    var peekPx by mutableStateOf(0f); private set
     val height = Animatable(0f)
     private var startPx = 0f
     private var dragging = false
 
     /** Topes del panel. Cerrado depende de lo que muestra (lista o ficha). */
-    fun setBounds(min: Float, max: Float) {
+    fun setBounds(min: Float, max: Float, peek: Float = min) {
         val first = minPx == 0f
-        minPx = min; maxPx = max
-        val target = if (expanded) max else min
+        minPx = min; maxPx = max; peekPx = peek
+        val target = target()
         scope.launch { if (first) height.snapTo(target) else if (!dragging) height.animateTo(target, Spring) }
     }
 
+    private fun target() = if (expanded) maxPx else if (minimized) peekPx else minPx
+
     fun expand(value: Boolean) {
         expanded = value
-        scope.launch { height.animateTo(if (value) maxPx else minPx, Spring) }
+        if (value) minimized = false
+        scope.launch { height.animateTo(target(), Spring) }
     }
 
-    fun toggle() = expand(!expanded)
+    fun minimize(value: Boolean) {
+        minimized = value
+        if (value) expanded = false
+        scope.launch { height.animateTo(target(), Spring) }
+    }
+
+    /** La barrita: desde el mínimo vuelve al alto normal; si no, alterna. */
+    fun toggle() = if (minimized) minimize(false) else expand(!expanded)
 
     fun start() { if (!dragging) { dragging = true; startPx = height.value } }
 
     /** delta > 0 es el dedo hacia abajo. */
     fun dragBy(delta: Float) {
         start()
-        scope.launch { height.snapTo((height.value - delta).coerceIn(minPx, maxPx)) }
+        scope.launch { height.snapTo((height.value - delta).coerceIn(minOf(peekPx, minPx), maxPx)) }
     }
 
     /** velocity > 0 es hacia abajo, en px/s. */
@@ -61,11 +74,13 @@ class PanelSheet(private val scope: CoroutineScope, private val thresholdPx: Flo
         if (!dragging) return
         dragging = false
         val predictedUp = (height.value - startPx) - velocity * 0.15f
-        expand(when {
-            predictedUp > thresholdPx -> true
-            predictedUp < -thresholdPx -> false
-            else -> expanded
-        })
+        when {
+            // Arriba: del mínimo al normal, del normal a todo.
+            predictedUp > thresholdPx -> if (minimized) minimize(false) else expand(true)
+            // Abajo: de todo al normal, del normal al mínimo.
+            predictedUp < -thresholdPx -> if (expanded) expand(false) else minimize(true)
+            else -> scope.launch { height.animateTo(target(), Spring) }
+        }
     }
 
     /** Para listas que se desplazan dentro del panel abierto. */

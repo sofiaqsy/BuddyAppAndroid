@@ -79,8 +79,9 @@ object ProductFocus {
         pending = Triple(spotId.lowercase(), "$productId-${presentationId ?: ""}", System.currentTimeMillis())
     }
     fun take(spotId: String): String? {
+        // No se borra al leer: el panel puede rearmarse (llega otra lista de
+        // lugares) y perdía el producto tocado. Vence a los 10 s.
         val p = pending ?: return null
-        pending = null
         return if (p.first == spotId.lowercase() && System.currentTimeMillis() - p.third < 10_000) p.second else null
     }
 }
