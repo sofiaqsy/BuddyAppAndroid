@@ -20,6 +20,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.material.icons.outlined.People
+import androidx.compose.ui.draw.shadow
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.HowToReg
@@ -99,22 +103,28 @@ fun ConexionesScreen(
         return
     }
 
+    // Chat con un negocio, a pantalla completa (como iOS).
+    var bizChat by androidx.compose.runtime.saveable.rememberSaveable(stateSaver = androidx.compose.runtime.saveable.autoSaver()) {
+        androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var bizChatTitle by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+    var inboxReload by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(0) }
+    bizChat?.let { id ->
+        com.buddy.app.features.businesschat.BusinessChatScreen(
+            com.buddy.app.features.businesschat.BusinessChatTarget(title = bizChatTitle, conversationId = id),
+            onClose = { bizChat = null; inboxReload++ },
+            vm = hiltViewModel(key = "biz-$id"),
+        )
+        return
+    }
+
     Column(modifier.fillMaxSize().background(BuddyColor.Canvas)) {
-        // ── Header — misma voz que el tab Trips ───────────────────────────
-        Column(Modifier.padding(horizontal = Spacing.edge, vertical = Spacing.md)) {
-            Text(
-                buildAnnotatedString {
-                    withStyle(SpanStyle(color = BuddyColor.Ink)) { append("Tus ") }
-                    withStyle(SpanStyle(color = BuddyColor.Brand)) { append("conexiones.") }
-                },
-                style = BuddyType.Title1,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                "Las personas que estuvieron contigo cuando llegaste.",
-                style = BuddyType.Subhead,
-                color = BuddyColor.InkMuted,
-            )
+        // ── Header — igual que iOS (Villa Rica, 19 Nov 2026): título grande en
+        // forest y una línea de contexto, como Comunidad.
+        Column(Modifier.padding(start = Spacing.edge, end = Spacing.edge, top = Spacing.md, bottom = Spacing.sm),
+               verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("Tus conexiones", style = BuddyType.DisplayXL, color = BuddyColor.Brand,
+                 modifier = Modifier.semantics { heading() })
+            Text("Tus conversaciones con los negocios", style = BuddyType.Footnote, color = BuddyColor.InkMuted)
         }
 
         // ── Estado anónimo: invitación a crear perfil, no un tab vacío ─────
@@ -128,6 +138,13 @@ fun ConexionesScreen(
                 isLoading = isSigningIn,
                 error = signInError,
                 onGoogle = { ctx -> sessionVm.signInWithGoogle(ctx) },
+            )
+            // Villa Rica V1 sin buddies: el visitante ve sus conversaciones con
+            // negocios (Keyla, 23 Nov 2026), igual que iOS.
+            !com.buddy.app.core.Features.SHOWS_BUDDY_TOOLS -> com.buddy.app.features.businesschat.VisitorInbox(
+                onOpen = { t -> bizChatTitle = t.title; bizChat = t.conversationId },
+                empty = { EmptyConnectionsState(onCreateTrip = onOpenTrips) },
+                reloadKey = inboxReload,
             )
             // Spinner SOLO antes de la primera carga (después es silencioso)
             !state.hasLoadedOnce && state.connections.isEmpty() ->
@@ -153,19 +170,19 @@ private fun AnonymousConnectionState(
             Modifier
                 .padding(horizontal = Spacing.edge)
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(Radius.lg))
+                .shadow(6.dp, RoundedCornerShape(14.dp), ambientColor = Color.Black.copy(alpha = 0.05f), spotColor = Color.Black.copy(alpha = 0.05f))
+                .clip(RoundedCornerShape(14.dp))
                 .background(BuddyColor.Surface)
-                .border(1.dp, BuddyColor.Border, RoundedCornerShape(Radius.lg))
                 .padding(Spacing.lg),
         ) {
             // Header — icono de camino + mensaje
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Box(
-                    Modifier.size(44.dp).background(BuddyColor.GroupedBg, CircleShape),
+                    Modifier.size(44.dp).background(BuddyColor.PaleSage, CircleShape),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        Icons.Filled.Route, contentDescription = null,
+                        Icons.Outlined.People, contentDescription = null,
                         Modifier.size(18.dp), tint = BuddyColor.Brand,
                     )
                 }
@@ -184,11 +201,14 @@ private fun AnonymousConnectionState(
             // Beneficios — misma copy que iOS
             Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
                 AnonymousBenefit(Icons.AutoMirrored.Filled.Chat, "Tus conversaciones",
-                    "Consulta el historial de lo que hablaste con tus buddies.")
-                AnonymousBenefit(Icons.Filled.HowToReg, "Tus buddies",
-                    "Las personas que te ayudaron, siempre a un mensaje de distancia.")
-                AnonymousBenefit(Icons.Filled.FavoriteBorder, "Tu impacto",
-                    "Recuerda también a quienes ayudaste tú.")
+                    "Consulta el historial de lo que hablaste con los negocios.")
+                // Sin buddies en Villa Rica V1 (Keyla, 23 Nov 2026).
+                if (com.buddy.app.core.Features.SHOWS_BUDDY_TOOLS) {
+                    AnonymousBenefit(Icons.Filled.HowToReg, "Tus buddies",
+                        "Las personas que te ayudaron, siempre a un mensaje de distancia.")
+                    AnonymousBenefit(Icons.Filled.FavoriteBorder, "Tu impacto",
+                        "Recuerda también a quienes ayudaste tú.")
+                }
             }
             Spacer(Modifier.height(Spacing.md))
             HorizontalDivider(color = BuddyColor.Border)
@@ -711,26 +731,27 @@ private fun EmptyConnectionsState(onCreateTrip: () -> Unit) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Icon(
-            Icons.Filled.People, contentDescription = null,
-            Modifier.size(44.dp), tint = BuddyColor.InkMuted.copy(alpha = 0.4f),
-        )
+        Box(Modifier.size(56.dp).background(BuddyColor.PaleSage, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(Icons.Outlined.People, contentDescription = null, Modifier.size(26.dp), tint = BuddyColor.Brand)
+        }
         Spacer(Modifier.height(Spacing.md))
-        Text("Las conexiones nacen de un trip", style = BuddyType.Callout, color = BuddyColor.Ink)
+        Text("Todavía no tienes conversaciones", style = BuddyType.Title3, color = BuddyColor.Ink, textAlign = TextAlign.Center)
         Spacer(Modifier.height(4.dp))
         Text(
-            "Cuando llegues a tu destino, un buddy te estará esperando.",
+            "Pregúntale a un negocio desde su página y la conversación aparecerá aquí.",
             style = BuddyType.Footnote, color = BuddyColor.InkMuted, textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(Spacing.md))
         Box(
             Modifier
+                .height(44.dp)
                 .clip(RoundedCornerShape(50))
-                .background(BuddyColor.Ink)
+                .background(BuddyColor.Brand)
                 .clickable(onClick = onCreateTrip)
-                .padding(horizontal = Spacing.lg, vertical = 12.dp),
+                .padding(horizontal = Spacing.lg),
+            contentAlignment = Alignment.Center,
         ) {
-            Text("Crear mi trip", style = BuddyType.FootnoteBold, color = BuddyColor.InkInverse)
+            Text("Explorar lugares", style = BuddyType.FootnoteBold, color = BuddyColor.InkInverse)
         }
     }
 }

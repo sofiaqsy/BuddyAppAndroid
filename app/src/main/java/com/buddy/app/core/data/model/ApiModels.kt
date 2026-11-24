@@ -42,6 +42,8 @@ data class ApiDestination(
     @SerialName("radius_meters") val radiusMeters: Int? = null,
     @SerialName("cover_url") val coverUrl: String? = null,
     val active: Boolean,
+    /** Eslogan del destino ("La tierra del café más fino del mundo"). */
+    val slogan: String? = null,
 )
 
 // GET /search/places

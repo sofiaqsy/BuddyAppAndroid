@@ -92,6 +92,11 @@ class HomeViewModel @Inject constructor(
          *  dice que la búsqueda sigue viva en vez de invitar a empezar otra —
          *  la búsqueda pudo arrancar en otra pantalla. */
         val openRequestCategory: String? = null,
+        /** El id de esa misma solicitud — para poder cancelarla directo,
+         *  sin depender de que MatchingViewModel.state también la conozca
+         *  (puede no conocerla: esta solicitud pudo quedar abierta de una
+         *  sesión anterior, nunca "empezada" desde el matchingVm actual). */
+        val openRequestId: String? = null,
         // MARK: – Comunidad viva
         val communityPulse: List<ApiPulseItem> = emptyList(), // pulso global (fallback)
         val isLoadingCommunity: Boolean = false,
@@ -297,13 +302,31 @@ class HomeViewModel @Inject constructor(
         runCatching { matchingRepo.myRequest() }
             .onSuccess { req ->
                 Log.d(TAG, "openRequest → ${req?.category ?: "ninguna"}")
-                _state.update { it.copy(openRequestCategory = req?.category) }
+                _state.update { it.copy(openRequestCategory = req?.category, openRequestId = req?.id) }
             }
             .onFailure {
                 // Un fallo NO se escribe como "no hay solicitud": eso apagaría
                 // el estado de búsqueda de alguien que sí está buscando.
                 Log.e(TAG, "myRequest failed — conservo el estado anterior", it)
             }
+    }
+
+    /**
+     * Cancela la solicitud abierta usando el id que ESTE ViewModel ya tiene
+     * (de refreshOpenRequest), sin pasar por MatchingViewModel.state — esa
+     * solicitud pudo quedar abierta de antes y matchingVm nunca se enteró,
+     * así que su cancelSearch() (que exige _state.value is Searching) no
+     * servía: el botón "Cancelar solicitud" se veía pero no hacía nada.
+     * Optimista: limpia el CTA de inmediato, no espera la respuesta del
+     * servidor — cancelar es barato y la próxima carga real lo confirma.
+     */
+    fun cancelOpenRequest() {
+        val id = state.value.openRequestId ?: return
+        _state.update { it.copy(openRequestCategory = null, openRequestId = null) }
+        viewModelScope.launch {
+            runCatching { matchingRepo.cancelRequest(id) }
+                .onFailure { Log.e(TAG, "cancelOpenRequest falló para ${id.take(8)}", it) }
+        }
     }
 
     fun onPermissionResult(granted: Boolean) {

@@ -236,7 +236,7 @@ fun UserProfileScreen(
             )
         }
 
-        state.user?.buddyProfile?.let { bp ->
+        state.user?.buddyProfile?.takeIf { com.buddy.app.core.Features.SHOWS_BUDDY_TOOLS }?.let { bp ->
             TarjetaDeBuddy(bp, Modifier.padding(horizontal = Spacing.edge, vertical = Spacing.md))
         }
 

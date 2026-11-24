@@ -313,8 +313,37 @@ fun ConversacionPendienteHost(
 ) {
     val state by homeVm.state.collectAsState()
     val searchState by matchingVm.state.collectAsState()
+    val pioneerNote by matchingVm.pioneerConfirmation.collectAsState()
+    // Semilla desde homeVm.state.openRequestCategory (no desde null fijo): una
+    // solicitud pudo quedar abierta de una sesión anterior — matchingVm nunca
+    // se enteró de ella (nace con SearchState.Idle), así que sin esto la
+    // pantalla abría siempre en el selector y no había forma de llegar al
+    // botón "Cancelar solicitud" para esa solicitud huérfana. Era justo el
+    // bug reportado: el CTA del Home decía "Buscando…" para siempre porque no
+    // había ningún camino en la UI para cancelarla.
     var categoriaElegida by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf<String?>(null)
+        android.util.Log.d(
+            "ConversacionPendienteHost",
+            "seed categoriaElegida desde openRequestCategory=${homeVm.state.value.openRequestCategory}",
+        )
+        androidx.compose.runtime.mutableStateOf(homeVm.state.value.openRequestCategory)
+    }
+
+    // homeVm solo se entera de una solicitud abierta por su PROPIO poll
+    // (GET /matching/my-request), que nadie dispara justo después de crear
+    // una acá — así que homeVm.state.openRequestId se quedaba null y
+    // homeVm.cancelOpenRequest() no tenía qué cancelar (ese era el bug real:
+    // el botón "Cancelar solicitud" corría, pero sus dos intentos de
+    // cancelar fallaban en silencio por falta de id). Sincronizar apenas
+    // aparece una búsqueda real o una confirmación pioneer cierra esa
+    // ventana.
+    androidx.compose.runtime.LaunchedEffect(searchState is com.buddy.app.features.matching.MatchingViewModel.SearchState.Searching) {
+        if (searchState is com.buddy.app.features.matching.MatchingViewModel.SearchState.Searching) {
+            homeVm.refreshTripState()
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(pioneerNote) {
+        if (pioneerNote != null) homeVm.refreshTripState()
     }
 
     /**
@@ -361,10 +390,19 @@ fun ConversacionPendienteHost(
     }
 
     fun cerrar() {
-        // Cerrar mientras busca cancela la búsqueda: dejarla viva sin nada en
-        // pantalla que lo diga es como se acumulan solicitudes olvidadas.
-        if (searchState is com.buddy.app.features.matching.MatchingViewModel.SearchState.Searching) {
-            matchingVm.cancelSearch()
+        android.util.Log.d(
+            "ConversacionPendienteHost",
+            "cerrar() categoriaElegida=$categoriaElegida searchState=$searchState pioneerNote=$pioneerNote",
+        )
+        // Cerrar con un tema ya elegido cancela lo que sea que esté en vuelo:
+        // dejarlo vivo sin nada en pantalla que lo diga es como se acumulan
+        // solicitudes olvidadas. categoriaElegida != null cubre los tres
+        // casos — Searching ya asentado, creación todavía en vuelo (el bug
+        // real: tocar un tema y volver enseguida, antes de que
+        // createHelpRequest respondiera, dejaba la solicitud huérfana porque
+        // acá todavía se veía Idle), y pioneerRegister todavía en curso.
+        if (categoriaElegida != null && pioneerNote == null) {
+            matchingVm.cancelPendingIfInFlight()
         }
         categoriaElegida = null
         onClose()
@@ -405,8 +443,16 @@ fun ConversacionPendienteHost(
             // pantalla — cerrar() (back/swipe) es la intención distinta de
             // "ya no quiero ayuda, vuelvo al Home". Espejo de cancelSearch
             // (iOS) en su rama "vino del selector".
+            //
+            // Dos cancelaciones, no una: matchingVm.cancelSearch() exige
+            // _state.value is Searching, así que no hace nada si esta
+            // solicitud quedó abierta de una sesión anterior y matchingVm
+            // nunca se enteró (el botón se veía pero no cancelaba nada — el
+            // bug real). homeVm.cancelOpenRequest() cancela por id, sin esa
+            // dependencia, y limpia el CTA del Home al instante.
             onCancelRequest = {
                 matchingVm.cancelSearch()
+                homeVm.cancelOpenRequest()
                 categoriaElegida = null
             },
             // Se monta fuera del Scaffold, a pantalla completa (comentario más

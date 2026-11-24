@@ -83,6 +83,9 @@ class TravelerStoriesViewModel @Inject constructor(
                     cursor = page.nextCursor
                     hasMore = page.hasMore && page.nextCursor != null
                     _state.update { State(stories = page.items, isLoading = false) }
+                    // Comunidad agrupa por destino: dos páginas más dan filas
+                    // llenas (igual que iOS TravelerStoriesSection.load).
+                    repeat(2) { if (hasMore) fetchMore() }
                     return@launch
                 } catch (e: CancellationException) {
                     throw e
@@ -103,12 +106,17 @@ class TravelerStoriesViewModel @Inject constructor(
      */
     fun loadMore() {
         if (!hasMore || cursor == null || _state.value.isLoadingMore) return
+        viewModelScope.launch { fetchMore() }
+    }
+
+    private suspend fun fetchMore() {
+        if (!hasMore || cursor == null || _state.value.isLoadingMore) return
         _state.update { it.copy(isLoadingMore = true) }
-        viewModelScope.launch {
+        run {
             try {
                 repeat(3) {
-                    val actual = cursor ?: return@launch
-                    if (!hasMore) return@launch
+                    val actual = cursor ?: return@run
+                    if (!hasMore) return@run
                     val loc = location()
                     val page = api.feedStories(limit = 10, lat = loc?.lat, lng = loc?.lng, cursor = actual)
                     val fresh = page.items.filter { seenIds.add(it.id) }
@@ -116,7 +124,7 @@ class TravelerStoriesViewModel @Inject constructor(
                     hasMore = page.hasMore && page.nextCursor != null
                     if (fresh.isNotEmpty()) {
                         _state.update { it.copy(stories = it.stories + fresh) }
-                        return@launch
+                        return@run
                     }
                     Log.d(TAG, "página sin novedades (${page.items.size} repetidos) — sigo")
                 }

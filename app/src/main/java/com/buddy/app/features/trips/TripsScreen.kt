@@ -22,6 +22,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.shadow
+import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -90,6 +93,9 @@ fun TripsScreen(
     onOpenProfile: (travelerId: String, name: String?, avatarUrl: String?) -> Unit = { _, _, _ -> },
     /** Sube con el re-tap del tab: vuelve arriba (espejo de .tabReselected). */
     scrollToTopToken: Int = 0,
+    /** true dentro de Yo -> "Mis trips" (iOS TripsView embedded): encabezado
+     *  "Tus trips" y sin historias de otros (viven en Comunidad). */
+    embedded: Boolean = false,
     /** Abre el chat de un match directamente (overlay de BuddyRoot). */
     onOpenChat: (matchId: String) -> Unit = {},
     viewModel: TripsViewModel = hiltViewModel(),
@@ -189,10 +195,29 @@ fun TripsScreen(
     // Logo fijo arriba (como iOS); sin título de sección —ni "TU BITÁCORA" ni
     // "Tu trip."—. Las acciones del trip viven dentro de su tarjeta.
     Column(modifier.fillMaxSize().background(BuddyColor.Canvas)) {
-    com.buddy.app.core.designsystem.components.BuddyLogoHeader()
+    if (!embedded) com.buddy.app.core.designsystem.components.BuddyLogoHeader()
     Column(
         Modifier.weight(1f).fillMaxWidth().verticalScroll(scrollState),
     ) {
+        if (embedded) {
+            // Encabezado como iOS: "Tus trips" + "Tu bitácora de viaje"; "Nuevo
+            // trip" solo cuando ya hay uno (sin trips, la tarjeta vacía trae su botón).
+            Row(Modifier.fillMaxWidth().padding(horizontal = Spacing.edge, vertical = Spacing.sm),
+                verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Tus trips", style = BuddyType.DisplayXL, color = BuddyColor.Brand)
+                    Text("Tu bitácora de viaje", style = BuddyType.Footnote, color = BuddyColor.InkMuted)
+                }
+                if (state.selectedTrip != null) {
+                    Row(Modifier.height(36.dp).clip(RoundedCornerShape(50)).background(BuddyColor.Brand)
+                            .clickable(onClick = viewModel::openRegister).padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Icon(Icons.Filled.Add, null, Modifier.size(14.dp), tint = BuddyColor.InkInverse)
+                        Text("Nuevo trip", style = BuddyType.FootnoteBold, color = BuddyColor.InkInverse)
+                    }
+                }
+            }
+        }
         Spacer(Modifier.height(Spacing.sm))
 
         // ── Selector horizontal — solo con más de un trip ──────────────────
@@ -246,6 +271,7 @@ fun TripsScreen(
 
         // Historias de otros viajeros, después de lo propio (el trip en curso
         // o la invitación a registrar uno).
+        if (!embedded) {
         Spacer(Modifier.height(Spacing.xl))
         TravelerStoriesSection(
             reloadToken = scrollToTopToken,
@@ -260,6 +286,7 @@ fun TripsScreen(
                 )
             },
         )
+        }
 
         Spacer(Modifier.height(100.dp))
     }
@@ -270,15 +297,18 @@ fun TripsScreen(
             step = shareLugarStep,
             nearbySpots = state.nearbySpots,
             isPrefetchingNearby = state.isPrefetchingNearby,
-            searchResults = state.shareLugarSearchResults,
+            userLat = state.shareLugarLat,
+            userLng = state.shareLugarLng,
             categories = state.spotCategories,
             isSubmitting = state.isSharingLugar,
             errorMessage = state.shareLugarError,
             onDismiss = viewModel::closeShareLugar,
             onStep = { shareLugarStep = it },
             onPickSpot = viewModel::pickSpot,
-            onQueryChange = viewModel::shareLugarSearch,
-            onPropose = viewModel::proposeSpot,
+            onPropose = { nombre, categoriaId -> viewModel.proposeSpot(nombre, categoriaId) },
+            onProposeAt = { nombre, categoriaId, lat, lng ->
+                viewModel.proposeSpot(nombre, categoriaId, lat, lng)
+            },
         )
     }
 
@@ -476,28 +506,27 @@ private fun TripSelectorCard(
     }
 }
 
-/** Empty state — sin icono, copy exacta y botón cápsula ink "＋ Registrar trip". */
+/** Empty state como iOS emptyCard: insignia pale sage, título y botón forest. */
 @Composable
 private fun EmptyTripsState(onRegister: () -> Unit) {
     Column(
-        Modifier.fillMaxWidth().padding(top = 60.dp),
+        Modifier.padding(horizontal = Spacing.edge, vertical = Spacing.md).fillMaxWidth()
+            .shadow(6.dp, RoundedCornerShape(14.dp), ambientColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.05f), spotColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.05f))
+            .clip(RoundedCornerShape(14.dp)).background(BuddyColor.Surface)
+            .padding(horizontal = Spacing.md, vertical = Spacing.xl),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(Spacing.md),
     ) {
-        Text("Tu próximo trip te espera", style = BuddyType.Title3, color = BuddyColor.Ink)
-        Text(
-            "Registra tu próximo destino\ny comparte tu trip.",
-            style = BuddyType.Callout,
-            color = BuddyColor.InkMuted,
-            textAlign = TextAlign.Center,
-        )
+        Box(Modifier.size(56.dp).background(BuddyColor.PaleSage, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(Icons.Outlined.Map, contentDescription = null, Modifier.size(26.dp), tint = BuddyColor.Brand)
+        }
+        Text("Tu próximo trip te espera", style = BuddyType.Title3, color = BuddyColor.Ink, textAlign = TextAlign.Center)
+        Text("Registra tu próximo destino y comparte tu trip.", style = BuddyType.Callout,
+             color = BuddyColor.InkMuted, textAlign = TextAlign.Center)
         Row(
-            Modifier
-                .padding(top = Spacing.sm)
-                .clip(RoundedCornerShape(50))
-                .background(BuddyColor.Ink)
-                .clickable(onClick = onRegister)
-                .padding(horizontal = Spacing.lg, vertical = 13.dp),
+            Modifier.padding(top = Spacing.xs).height(44.dp)
+                .clip(RoundedCornerShape(50)).background(BuddyColor.Brand)
+                .clickable(onClick = onRegister).padding(horizontal = Spacing.lg),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {

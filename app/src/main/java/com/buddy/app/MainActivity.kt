@@ -45,7 +45,11 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             BuddyTheme {
-                BuddyRoot()
+                androidx.compose.foundation.layout.Box {
+                    BuddyRoot()
+                    // El visor de fotos, encima de todo y en la misma ventana.
+                    com.buddy.app.core.designsystem.components.PhotoOverlayHost()
+                }
             }
         }
     }

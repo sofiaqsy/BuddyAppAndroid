@@ -2,6 +2,8 @@ package com.buddy.app.navigation
 
 import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.People
@@ -25,7 +27,8 @@ enum class AppTab(
     val activeIcon: ImageVector,
 ) {
     Inicio("inicio", R.string.tab_inicio, Icons.Outlined.Home, Icons.Filled.Home),
-    Trips("trips", R.string.tab_trips, Icons.Outlined.Map, Icons.Filled.Map),
+    // "Comunidad" (antes Trips), ícono de globo como iOS globe.americas.
+    Trips("trips", R.string.tab_trips, Icons.Outlined.Public, Icons.Filled.Public),
     Conexiones("conexiones", R.string.tab_conexiones, Icons.Outlined.People, Icons.Filled.People),
     Yo("yo", R.string.tab_yo, Icons.Outlined.AccountCircle, Icons.Filled.AccountCircle),
 }

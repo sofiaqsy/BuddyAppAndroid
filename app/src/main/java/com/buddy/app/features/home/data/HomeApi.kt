@@ -19,6 +19,33 @@ import retrofit2.http.Query
 /** Endpoints del Home — los mismos que dispara InicioView al aparecer. */
 interface HomeApi {
 
+    /** Búsqueda dentro de los productos de los negocios (igual que iOS). */
+    @GET("integrations/fincas/product-search")
+    suspend fun productSearch(@retrofit2.http.Query("q") q: String): ProductSearchResponse
+
+    // ── Preguntar al negocio (chat visitante ↔ negocio), igual que iOS ──────
+    @POST("integrations/business-chat/start")
+    suspend fun bizStart(@Body body: com.buddy.app.features.businesschat.BizStartBody): com.buddy.app.features.businesschat.BizConversationRef
+
+    @GET("integrations/business-chat/conversations")
+    suspend fun bizConversations(): com.buddy.app.features.businesschat.BizConversationsResponse
+
+    @GET("integrations/business-chat/{id}/messages")
+    suspend fun bizMessages(@Path("id") id: String): com.buddy.app.features.businesschat.BizThread
+
+    @POST("integrations/business-chat/{id}/messages")
+    suspend fun bizSend(@Path("id") id: String, @Body body: com.buddy.app.features.businesschat.BizSendBody): com.buddy.app.features.businesschat.BizMessage
+
+    @POST("integrations/business-chat/{id}/report")
+    suspend fun bizReport(@Path("id") id: String, @Body body: com.buddy.app.features.businesschat.BizReportBody): com.buddy.app.features.businesschat.BizOk
+
+    @POST("integrations/business-chat/{id}/block")
+    suspend fun bizBlock(@Path("id") id: String, @Body body: com.buddy.app.features.businesschat.BizEmpty = com.buddy.app.features.businesschat.BizEmpty()): com.buddy.app.features.businesschat.BizOk
+
+    /** Productos de un lugar con negocio (vacío si el lugar no tiene negocio). */
+    @GET("integrations/fincas/spots/{id}/products")
+    suspend fun spotProducts(@Path("id") spotId: String): com.buddy.app.core.data.model.SpotProductsPage
+
     /** 204 No Content cuando no hay match (por eso Response<...>). */
     @POST("location/resolve")
     suspend fun resolveLocation(@Body body: ResolveRequest): Response<ApiLocationResolution>
@@ -293,3 +320,13 @@ data class ApiSpotRef(
     @kotlinx.serialization.SerialName("cover_url") val coverUrl: String? = null,
     val status: String? = null,
 )
+
+
+@kotlinx.serialization.Serializable
+data class ProductSearchResponse(val results: List<ProductSearchHit> = emptyList())
+
+@kotlinx.serialization.Serializable
+data class ProductSearchHit(val spotId: String, val products: List<ProductHit> = emptyList())
+
+@kotlinx.serialization.Serializable
+data class ProductHit(val id: String, val name: String, val price: Double? = null)

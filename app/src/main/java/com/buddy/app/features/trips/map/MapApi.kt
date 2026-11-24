@@ -49,6 +49,10 @@ interface MapApi {
         @Query("limit") limit: Int = 20,
     ): ApiGalleryResponse
 
+    /** Fotos del dueño del lugar (portada primero). */
+    @GET("integrations/fincas/spots/{id}/photos")
+    suspend fun ownerPhotos(@retrofit2.http.Path("id") spotId: String): ApiOwnerPhotosResponse
+
     /** El destino, para sus COORDENADAS.
      *
      *  Hace falta cuando se llega por un nombre —la ciudad de comunidad viva, el
@@ -81,6 +85,7 @@ data class ApiGuideSpot(
     /** "pending" mientras espera aprobación — solo llega a quien lo propuso. */
     val status: String? = null,
     @SerialName("place_category") val category: ApiSpotCategory? = null,
+    @SerialName("destination_id") val destinationId: String? = null,
 ) {
     val categoryName: String? get() = category?.name
     val estaPendiente: Boolean get() = status == "pending"
@@ -115,6 +120,13 @@ data class ApiGalleryVisit(
 )
 
 data class FotoDeLugar(val url: String, val autor: String?)
+
+/** Fotos que el dueño subió a su lugar; la primera es la portada (iOS OwnerPhoto). */
+@Serializable
+data class ApiOwnerPhoto(val id: String, val url: String, val position: Int = 0)
+
+@Serializable
+data class ApiOwnerPhotosResponse(val photos: List<ApiOwnerPhoto> = emptyList())
 
 @Serializable
 data class ApiDestinationBuddiesResponse(

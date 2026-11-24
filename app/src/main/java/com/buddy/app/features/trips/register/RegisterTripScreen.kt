@@ -220,7 +220,7 @@ fun RegisterTripScreen(
         }
 
         // ── Community context card ────────────────────────────────────────
-        if (state.hasSelection) {
+        if (com.buddy.app.core.Features.SHOWS_BUDDY_TOOLS && state.hasSelection) {
             Spacer(Modifier.height(Spacing.sm))
             PlaceCommunityCard(
                 context = state.placeContext,

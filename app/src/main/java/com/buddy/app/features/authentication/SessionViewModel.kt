@@ -60,9 +60,24 @@ class SessionViewModel @Inject constructor(
             try {
                 val cred = googleProvider.signIn(activityContext)
                 authRepo.socialLogin(cred.provider, cred.identityToken, cred.fullName)
+            } catch (e: androidx.credentials.exceptions.GetCredentialCancellationException) {
+                // La persona cerró la ventana de Google: no es un error.
+                Log.d(TAG, "google sign-in cancelled")
+            } catch (e: androidx.credentials.exceptions.NoCredentialException) {
+                // No hay ninguna cuenta de Google en el teléfono: se explica y se
+                // abre la pantalla del sistema para agregarla (no se puede
+                // "intentar de nuevo" sin eso).
+                Log.e(TAG, "google sign-in: no Google account on device", e)
+                _error.value = "No hay una cuenta de Google en este teléfono. Agrégala y vuelve a tocar Continuar con Google."
+                runCatching {
+                    activityContext.startActivity(
+                        android.content.Intent(android.provider.Settings.ACTION_ADD_ACCOUNT)
+                            .putExtra(android.provider.Settings.EXTRA_ACCOUNT_TYPES, arrayOf("com.google"))
+                    )
+                }.onFailure { Log.e(TAG, "no se pudo abrir agregar cuenta", it) }
             } catch (e: Exception) {
                 Log.e(TAG, "google sign-in failed", e)
-                _error.value = "No se pudo iniciar sesión. Inténtalo de nuevo."
+                _error.value = "No se pudo iniciar sesión. Revisa tu conexión e inténtalo de nuevo."
             } finally {
                 _isSigningIn.value = false
             }

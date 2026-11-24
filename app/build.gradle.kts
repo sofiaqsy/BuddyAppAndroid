@@ -23,6 +23,7 @@ android {
 
     defaultConfig {
         applicationId = "com.vrcoffe.buddyapp"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         minSdk = 26
         targetSdk = 36
         // 1.0.4 y no 1.0.3: esta entrega trae lo mismo que la 1.0.4 de iOS
@@ -33,8 +34,11 @@ android {
         // (client_page_id), "Pendiente de aprobación" y la foto de cámara en
         // Android 8. Firmada con la upload key nueva (2026-09).
         // 8: velocidad de Home (bootstrap + cache) — espejo de iOS 1.1.1.
-        versionCode = 8
-        versionName = "1.1.1"
+        // 9: Home a una sola pantalla (carrusel vertical infinito, CTA con
+        // destino), bug del botón "Cancelar solicitud" y de solicitudes
+        // huérfanas al cerrar rápido — espejo de iOS 1.1.2.
+        versionCode = 12
+        versionName = "1.1.3"
 
         buildConfigField("String", "API_BASE_URL", "\"https://buddy-core-504b393f8333.herokuapp.com/v1/\"")
         // Dominio público de los enlaces que se comparten fuera de la app. NO es
@@ -66,6 +70,14 @@ android {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
+        }
+        // Para MEDIR velocidad como la verá la gente (R8, sin depurar) sin tocar
+        // las llaves de Play: firmada con la llave de depuración, nunca se sube.
+        create("benchmark") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
+            isDebuggable = false
         }
     }
     compileOptions {
@@ -128,5 +140,19 @@ dependencies {
     // equivalente Android del VNGenerateForegroundInstanceMaskRequest de iOS
     implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
 
+    // Instala los perfiles de arranque que traen Compose y las librerías también
+    // cuando la app no viene de Play (instalación directa, pruebas): arranca y
+    // se desplaza más rápido desde la primera vez.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+
     testImplementation(libs.junit)
+
+    // Pruebas de pantalla (Compose UI test), Keyla 20 Nov 2026: los mismos
+    // recorridos que BuddyAppUITests en iOS.
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:rules:1.6.1")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

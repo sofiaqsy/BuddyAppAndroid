@@ -32,6 +32,10 @@ object NetworkModule {
     @Provides
     @Singleton
     fun provideOkHttp(authInterceptor: AuthInterceptor): OkHttpClient = OkHttpClient.Builder()
+        // Igual que iOS (APIClient: 15 s por paso, 30 s en total): con señal
+        // mala falla rápido y la app sigue con lo guardado. Sin tope total, una
+        // búsqueda de DNS colgada dejó Inicio esperando 38 s (emulador, 21 nov 2026).
+        .withBuddyTimeouts()
         .addInterceptor(authInterceptor)
         .addInterceptor(HttpLoggingInterceptor().apply {
             level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BASIC
@@ -77,3 +81,10 @@ object NetworkModule {
     fun provideNotificationsApi(retrofit: Retrofit): com.buddy.app.core.data.NotificationsApi =
         retrofit.create(com.buddy.app.core.data.NotificationsApi::class.java)
 }
+
+/** 15 s por paso y 30 s en total, igual que iOS (probado en NetworkTimeoutsTest). */
+internal fun OkHttpClient.Builder.withBuddyTimeouts(): OkHttpClient.Builder = this
+    .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+    .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+    .writeTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+    .callTimeout(30, java.util.concurrent.TimeUnit.SECONDS)

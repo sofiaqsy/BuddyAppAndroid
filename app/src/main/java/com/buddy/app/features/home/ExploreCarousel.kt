@@ -23,7 +23,6 @@ import com.buddy.app.core.location.DistanceResolver
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -309,7 +308,6 @@ private fun ExploreCarouselCard(
         val antes = previa
         previa = etiqueta
         if (antes != null && etiqueta != null && antes != etiqueta) {
-            android.util.Log.d("ExploreCarousel", "📏 [distancia] ${place.name}: $antes → $etiqueta")
             pulsando = true
             delay(200)
             pulsando = false

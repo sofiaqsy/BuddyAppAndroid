@@ -53,6 +53,10 @@ class TripsViewModel @Inject constructor(
          *  así que se piden al abrir la hoja y no al tocar un botón. */
         val nearbySpots: List<com.buddy.app.features.home.data.ApiNearbySpot> = emptyList(),
         val isPrefetchingNearby: Boolean = false,
+        /** Dónde está el buddy al abrir la hoja: el mapa de "Buscar en el
+         *  mapa" nace centrado ahí. */
+        val shareLugarLat: Double? = null,
+        val shareLugarLng: Double? = null,
         /** Lugar elegido en la hoja. One-shot para navegar: NO se creó nada. */
         val lugarElegido: com.buddy.app.features.home.data.ApiNearbySpot? = null,
         val spotCategories: List<com.buddy.app.features.home.data.ApiSpotCategoryRef> = emptyList(),
@@ -227,7 +231,9 @@ class TripsViewModel @Inject constructor(
     private fun prefetchNearby() {
         viewModelScope.launch {
             _state.update { it.copy(isPrefetchingNearby = true) }
+            val inicio = android.os.SystemClock.elapsedRealtime()
             val loc = locationProvider.currentLocation()
+            Log.d(TAG, "prefetchNearby: ubicación ${if (loc != null) "(${loc.lat},${loc.lng})" else "NULL"} en ${android.os.SystemClock.elapsedRealtime() - inicio}ms")
             if (loc == null) {
                 _state.update { it.copy(isPrefetchingNearby = false) }
                 return@launch
@@ -235,18 +241,26 @@ class TripsViewModel @Inject constructor(
             val spots = runCatching { api.nearbySpots(loc.lat, loc.lng).spots }.getOrDefault(emptyList())
             val cats = runCatching { api.spotCategories().categories }.getOrDefault(emptyList())
             _state.update {
-                it.copy(nearbySpots = spots, spotCategories = cats, isPrefetchingNearby = false)
+                it.copy(
+                    nearbySpots = spots, spotCategories = cats, isPrefetchingNearby = false,
+                    shareLugarLat = loc.lat, shareLugarLng = loc.lng,
+                )
             }
         }
     }
 
     /** Propone el lugar (el spot SÍ se crea: el admin lo revisa exista o no una
      *  recomendación) y sigue al editor con él. */
-    fun proposeSpot(nombre: String, categoriaId: String?) {
+    fun proposeSpot(nombre: String, categoriaId: String?, lat: Double? = null, lng: Double? = null) {
         if (_state.value.isSharingLugar) return
         viewModelScope.launch {
             _state.update { it.copy(isSharingLugar = true, shareLugarError = null) }
-            val loc = locationProvider.currentLocation()
+            // Con un punto elegido en el mapa manda ESE; sin él, donde está el
+            // buddy (el "Registrar nuevo lugar" de siempre).
+            val loc = if (lat != null && lng != null) {
+                com.buddy.app.core.location.UserLocation(lat, lng)
+            } else locationProvider.currentLocation()
+            Log.d(TAG, "proposeSpot \"${nombre.trim()}\" origen=${if (lat != null) "mapa" else "gps"} coords=(${loc?.lat},${loc?.lng})")
             if (loc == null) {
                 _state.update {
                     it.copy(isSharingLugar = false,
@@ -264,6 +278,7 @@ class TripsViewModel @Inject constructor(
                     ),
                 )
             }.onSuccess { spot ->
+                Log.d(TAG, "proposeSpot ok id=${spot.id.take(8)} status=${spot.status} destino=${spot.destinationId?.take(8)}")
                 _state.update {
                     it.copy(
                         isSharingLugar = false, showShareLugarSheet = false,

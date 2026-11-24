@@ -28,23 +28,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Bed
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Coffee
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Hiking
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ShoppingBag
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -59,7 +51,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -69,7 +60,6 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.foundation.layout.width
-import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -102,6 +92,7 @@ import java.time.temporal.ChronoUnit
 @Composable
 fun InicioScreen(
     modifier: Modifier = Modifier,
+    reselectToken: Int = 0,
     onOpenTrips: () -> Unit = {},
     onOpenConexiones: () -> Unit = {},
     onOpenChat: (matchId: String, initialCategory: String?) -> Unit = { _, _ -> },
@@ -149,8 +140,11 @@ fun InicioScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    if (state.isLoading) {
-        BuddyLoading(modifier)
+    // Con lugares guardados se muestran ya (como iOS, que abre con la copia de
+    // disco y actualiza detrás); el esqueleto es solo para la primera vez.
+    if (state.isLoading && state.exploreCards.isEmpty()) {
+        androidx.compose.runtime.LaunchedEffect(Unit) { com.buddy.app.core.perf.PerfLog.sinceStartOnce("inicio-esqueleto") }
+        com.buddy.app.features.home.inicio.InicioRowsSkeleton(modifier)
         return
     }
 
@@ -161,81 +155,20 @@ fun InicioScreen(
     // mudó a ConversacionPendienteHost: ahora la dispara el tema que se elige
     // DENTRO de la conversación, y esa vive fuera de esta pantalla.
 
-    // Logo fijo arriba y el resto de la pantalla, SIN scroll — espejo de
-    // scrollBody (iOS): el Home cabe entero en una pantalla, así que no hay
-    // rebote ni "hay más abajo" que no existe. Se quitó Comunidad Viva
-    // (recent help + pulse) para que esto siga siendo cierto — ver abajo.
-    //
-    // Box y no Column directo: la confirmación pioneer va de OVERLAY flotante
-    // abajo (como un toast), no empujando la cabecera — antes se dibujaba
-    // inline arriba del todo y se quedaba pegada ahí, tapando "Consulta con
-    // un buddy". Espejo exacto del .overlay(alignment: .bottom) de iOS.
-    Box(modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize().background(BuddyColor.Canvas)) {
-    com.buddy.app.core.designsystem.components.BuddyLogoHeader()
-    Column(
-        Modifier.weight(1f).fillMaxWidth(),
-    ) {
-        Spacer(Modifier.height(Spacing.sm))
-
-        if (state.loadFailed) RetryRow(onRetry = { viewModel.load(force = true) })
-
-        // "Ahora en X" cuando el destino resuelto cambia: sin aviso el contenido
-        // se reemplaza solo y se lee como un fallo, no como el Home siguiéndote.
-        state.locationChangeMessage?.let { aviso ->
-            LaunchedEffect(aviso) {
-                kotlinx.coroutines.delay(2500)
-                viewModel.consumeLocationChangeMessage()
-            }
-            Text(
-                aviso,
-                style = BuddyType.Footnote,
-                color = BuddyColor.InkInverse,
-                modifier = Modifier
-                    .padding(horizontal = Spacing.edge)
-                    .clip(RoundedCornerShape(Radius.md))
-                    .background(BuddyColor.Brand)
-                    .padding(horizontal = Spacing.md, vertical = Spacing.sm),
-            )
-            Spacer(Modifier.height(Spacing.sm))
-        }
-
-        // ── Composer (con o sin trip — mismo layout, distinto destino) ─────
-        // Box: el loader flota centrado sobre el composer dimmeado mientras la
-        // intención se procesa (pioneer: trip + solicitud) — paridad con iOS.
-        // weight(1f): el composer ocupa TODO el espacio libre que dejan los
-        // banners de arriba — espejo de .frame(maxHeight: .infinity) (iOS).
-        // Sin esto quedaba un hueco en blanco entre el CTA y la tab bar.
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-        Column(
-            Modifier.fillMaxHeight().padding(horizontal = Spacing.edge)
-                .alpha(if (isFindingBuddy) 0.5f else 1f),
-        ) {
-            val effectiveContext = state.effectiveHomeContext
-            // El trip seleccionado ES el que tiene el match activo — con 2+
-            // trips vivos, uno puede no tener buddy asignado (ej: Villa Rica
-            // en "planning" mientras San Francisco tiene el match).
-            //
-            // Con el Home siguiendo al GPS (CurrentLocation) no hay trip
-            // "seleccionado", y exigirlo escondía al buddy asignado: el match
-            // existía pero su nombre no aparecía. iOS lo muestra en los dos
-            // contextos; aquí igual.
-            val selectedIsActiveTrip = when (effectiveContext) {
-                is HomeContext.Trip -> effectiveContext.journeyId == state.activeJourney?.id
-                HomeContext.CurrentLocation -> true
-                null -> false
-            }
-            // true cuando algo se pinta ARRIBA de CategoryPicker (el selector,
-            // o LocationContext en Case 4). CategoryPicker ya trae su propio
-            // Spacer(Spacing.md) antes del heading — sin esta bandera, el
-            // Spacer(Spacing.md) de arriba de la pantalla se sumaba a ese
-            // incluso sin nada que separar (Case 3), dejando un espacio doble
-            // e injustificado encima de "Consulta con un buddy".
-            // La única cabecera posible es LocationContext (sin GPS ni trip): el
-            // selector de contexto se quitó, manda el GPS.
-            val hasHeaderRow = effectiveContext == null
-            if (effectiveContext == null) {
-                // Case 4: ni GPS ni trip — flujo de permisos/registro existente.
+    // Villa Rica V1 (Keyla, 20 Nov 2026): el Inicio es el de iOS en filas
+    // (HomeRowsView). El composer anterior (CategoryPicker, buddy CTA) sigue en
+    // este archivo pero ya no se muestra, igual que en iOS (showsBuddyTools = false).
+    @Suppress("UNUSED_VARIABLE") val unusedLoading = isFindingBuddy
+    com.buddy.app.features.home.inicio.InicioRows(
+        cards = state.exploreCards,
+        placeName = state.destinationName,
+        destinationId = state.destinationId,
+        onOpenPlace = onOpenPlace,
+        reselectToken = reselectToken,
+        modifier = modifier,
+        activeBuddyName = null,
+        locationPrompt = if (state.effectiveHomeContext == null) {
+            {
                 LocationContext(
                     city = state.destinationName,
                     onRequestPermission = {
@@ -246,138 +179,8 @@ fun InicioScreen(
                     },
                 )
             }
-            CategoryPicker(
-                onDestinationTap = state.destinationId?.let { destId ->
-                    {
-                        val nombre = state.destinationName ?: ""
-                        onOpenPlace(ApiPlaceCard(id = destId, name = nombre,
-                                                 destinationId = destId,
-                                                 destinationName = nombre))
-                    }
-                },
-                destinationName = state.destinationName,
-                communityContext = state.communityContext,
-                activeBuddyName = if (selectedIsActiveTrip) state.activeBuddyName else null,
-                activeBuddyAvatarUrl = if (selectedIsActiveTrip) state.activeBuddyAvatarUrl else null,
-                // "Tú:" cuando el último mensaje es mío — misma convención que
-                // WhatsApp y que la lista de Conexiones. Sin él, leer "Cafetería
-                // Rosal" da a entender que lo mandó el buddy.
-                activeBuddySubtitle = if (selectedIsActiveTrip) {
-                    state.lastBuddyMessage?.let {
-                        if (state.isLastMessageFromMe) "Tú: $it" else it
-                    }
-                } else null,
-                activeBuddyHasUnread = selectedIsActiveTrip && state.unreadMessageCount > 0,
-                exploreCards = state.exploreCards,
-                isLoadingExplore = state.isLoadingExplore,
-                userLat = state.stableLat,
-                userLng = state.stableLng,
-                nearestSpotId = state.nearestSpotId,
-                searchingCategoryKey = state.openRequestCategory,
-                isLoading = isFindingBuddy,
-                topSpacing = hasHeaderRow,
-                onOpenPlace = onOpenPlace,
-                onOpenBuddyChat = {
-                    // Con buddy asignado el CTA no empieza nada nuevo: retoma el
-                    // hilo que ya existe.
-                    state.activeMatchId?.let { onOpenChat(it, null) } ?: onOpenConexiones()
-                },
-                onStartConversation = onStartConversation,
-                modifier = Modifier.fillMaxHeight(),
-            )
-
-            // "Consultar en X" abre la conversación a PANTALLA COMPLETA — la
-            // monta BuddyRoot fuera del Scaffold, como el chat. Una hoja modal
-            // dejaba la barra de tabs asomando y se leía como algo encima del
-            // Home en vez de como la conversación en la que estás.
-            Spacer(Modifier.height(Spacing.md))
-
-            // Aquí iba una segunda card de "buddy asignado". Se quitó: el CTA
-            // de arriba ya ES esa card cuando hay match — avatar, nombre,
-            // último mensaje y punto de no leídos—, así que la pantalla decía
-            // dos veces lo mismo, una debajo de la otra.
-            //
-            // Ese es el sentido de que el CTA tenga una sola forma para los
-            // tres momentos: no lo reemplaza otra cosa cuando aparece el buddy,
-            // se va llenando. iOS quitó su equivalente por lo mismo.
-
-            // Aquí iba "¿Vas a viajar?". Retirada: iOS ya la oculta en todos
-            // los casos. El Home pide una cosa —consultar con un buddy— y una
-            // segunda invitación a registrar un viaje competía con ella justo
-            // debajo, en el momento en que el usuario ya decidió qué hacer.
-        }
-
-        // Loader — cápsula con spinner mientras se registra la solicitud
-        if (isFindingBuddy) {
-            Row(
-                Modifier
-                    .align(Alignment.Center)
-                    .clip(RoundedCornerShape(50))
-                    .background(BuddyColor.Surface)
-                    .border(1.dp, BuddyColor.Border, RoundedCornerShape(50))
-                    .padding(horizontal = 18.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                androidx.compose.material3.CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    color = BuddyColor.Brand,
-                    strokeWidth = 2.dp,
-                )
-                Text("Registrando tu solicitud…", style = BuddyType.FootnoteBold, color = BuddyColor.Ink)
-            }
-        }
-        }
-
-        // Comunidad Viva (recent help + pulse) se quitó: el Home vuelve a ser
-        // una sola pantalla sin scroll, espejo de iOS. "Historias de
-        // viajeros" ya vivía en el tab Trips, debajo del trip propio.
-        Spacer(Modifier.height(Spacing.md))
-    }
-    }
-
-    // Confirmación pioneer — toast flotante abajo, espejo exacto de
-    // pioneerConfirmation (iOS): aparece con la solicitud ya registrada en
-    // silencio, se lee sola y se va — no exige que el usuario haga nada.
-    val pioneerNote by matchingViewModel.pioneerConfirmation.collectAsState()
-    androidx.compose.animation.AnimatedVisibility(
-        visible = pioneerNote != null,
-        enter = androidx.compose.animation.slideInVertically { it } + androidx.compose.animation.fadeIn(),
-        exit = androidx.compose.animation.slideOutVertically { it } + androidx.compose.animation.fadeOut(),
-        modifier = Modifier.align(Alignment.BottomCenter),
-    ) {
-        val msg = pioneerNote
-        if (msg != null) {
-            LaunchedEffect(msg) {
-                kotlinx.coroutines.delay(4000)
-                matchingViewModel.clearPioneerConfirmation()
-            }
-            Row(
-                Modifier
-                    .padding(horizontal = Spacing.edge)
-                    .padding(bottom = Spacing.md)
-                    .shadow(8.dp, RoundedCornerShape(Radius.md))
-                    .clip(RoundedCornerShape(Radius.md))
-                    .background(BuddyColor.Surface)
-                    .padding(Spacing.md),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-            ) {
-                Icon(Icons.Filled.CheckCircle, contentDescription = null, tint = BuddyColor.Brand)
-                Text(msg, style = BuddyType.Footnote, color = BuddyColor.Ink, modifier = Modifier.weight(1f))
-                androidx.compose.material3.IconButton(
-                    onClick = { matchingViewModel.clearPioneerConfirmation() },
-                    modifier = Modifier.size(28.dp),
-                ) {
-                    Icon(
-                        Icons.Filled.Close, contentDescription = "Cerrar",
-                        tint = BuddyColor.InkMuted, modifier = Modifier.size(14.dp),
-                    )
-                }
-            }
-        }
-    }
-    }
+        } else null,
+    )
 
     MatchingSheet(searchState, matchingViewModel, onOpenChat, onOpenConexiones)
 }

@@ -23,6 +23,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.material.icons.outlined.WorkOutline
+import androidx.compose.ui.draw.shadow
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
@@ -59,6 +65,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -165,15 +172,18 @@ fun YoScreen(
             step = shareLugarStep,
             nearbySpots = tripsState.nearbySpots,
             isPrefetchingNearby = tripsState.isPrefetchingNearby,
-            searchResults = tripsState.shareLugarSearchResults,
+            userLat = tripsState.shareLugarLat,
+            userLng = tripsState.shareLugarLng,
             categories = tripsState.spotCategories,
             isSubmitting = tripsState.isSharingLugar,
             errorMessage = tripsState.shareLugarError,
             onDismiss = tripsViewModel::closeShareLugar,
             onStep = { shareLugarStep = it },
             onPickSpot = tripsViewModel::pickSpot,
-            onQueryChange = tripsViewModel::shareLugarSearch,
-            onPropose = tripsViewModel::proposeSpot,
+            onPropose = { nombre, categoriaId -> tripsViewModel.proposeSpot(nombre, categoriaId) },
+            onProposeAt = { nombre, categoriaId, lat, lng ->
+                tripsViewModel.proposeSpot(nombre, categoriaId, lat, lng)
+            },
         )
     }
 
@@ -194,20 +204,19 @@ fun YoScreen(
         }
     }
 
-    Column(modifier.fillMaxSize().background(BuddyColor.Canvas).verticalScroll(rememberScrollState())) {
+    val yoScroll = rememberScrollState()
+    val screenH = with(androidx.compose.ui.platform.LocalDensity.current) {
+        androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp.toPx() }
+    Column(modifier.fillMaxSize().background(BuddyColor.Canvas).verticalScroll(yoScroll)) {
         // ── Header editorial + menú de cuenta ──────────────────────────────
         Row(
             Modifier.fillMaxWidth().padding(horizontal = Spacing.edge, vertical = Spacing.md),
             verticalAlignment = Alignment.Top,
         ) {
             Column(Modifier.weight(1f)) {
-                Text(
-                    buildAnnotatedString {
-                        withStyle(SpanStyle(color = BuddyColor.Ink)) { append("Tu ") }
-                        withStyle(SpanStyle(color = BuddyColor.Brand)) { append("historia.") }
-                    },
-                    style = BuddyType.Title1,
-                )
+                // Mismo encabezado que Comunidad y Conexiones (iOS "Tu perfil").
+                Text("Tu perfil", style = BuddyType.DisplayXL, color = BuddyColor.Brand,
+                     modifier = Modifier.semantics { heading() })
             }
             if (session?.isVerified == true) {
                 AccountMenu(
@@ -243,31 +252,23 @@ fun YoScreen(
             )
             // 2 — Bio
             BioSection(state, viewModel, Modifier.padding(horizontal = Spacing.edge))
+
+            // Mis trips: el registro y el trip en curso viven aquí (iOS, Keyla
+            // 19 Nov 2026), no en la pestaña Comunidad.
+            Spacer(Modifier.height(Spacing.lg))
+            MyTripsEntryCard(onOpenTrips, Modifier.padding(horizontal = Spacing.edge))
             Spacer(Modifier.height(Spacing.xl))
-            // 3 — Rol buddy: fila nav si es buddy; CTA discreto si no
-            if (state.buddyMe?.isBuddy == true) {
-                BuddyNavRow(
-                    state,
-                    Modifier
-                        .padding(horizontal = Spacing.edge)
-                        .clickable { showBuddyProfile = true },
-                )
-            } else {
-                BecomeBuddyCTA(
-                    isLoading = state.isBecomingBuddy,
-                    onTap = { showBecomeBuddyConfirm = true },
-                    modifier = Modifier.padding(horizontal = Spacing.edge),
-                )
-            }
+            // Sin "Perfil de Buddy" ni invitaciones a ser buddy en Yo (iOS,
+            // Keyla 20 Nov 2026: no es necesario).
             // La colección de stickers salió del perfil (iOS igual). Los datos se
             // siguen cargando; solo deja de mostrarse la sección.
 
             // Visible si PUEDE aportar (necesita la entrada) o si ya aportó —
             // a quien ya recomendó no se le esconde lo suyo aunque su
             // verificación haya cambiado después.
-            val puedeRecomendar = state.buddyMe?.profile?.verificationStatus == "approved"
+            // Cualquier viajero con sesión puede recomendar lugares (iOS, Keyla 20 Nov 2026).
+            val puedeRecomendar = session?.isVerified == true
             if (puedeRecomendar || state.shares.isNotEmpty()) {
-                Spacer(Modifier.height(Spacing.xl))
                 LugaresQueRecomiendasSection(
                     shares = state.shares,
                     puedeRecomendar = puedeRecomendar,
@@ -292,8 +293,15 @@ fun YoScreen(
     viewerJourney?.let { journey ->
         StoryViewerDialog(
             journey = journey,
-            thumbsProvider = { viewModel.storyThumbs(journey) },
+            thumbsProvider = { viewModel.storyThumbs(it) },
             onDismiss = { viewerJourney = null },
+            journeys = state.journeys,
+            // Si su miniatura está fuera de pantalla (más abajo de las primeras),
+            // el perfil se desplaza detrás para que al cerrar la foto vuelva a ella.
+            onShowingJourney = { j ->
+                val r = com.buddy.app.core.designsystem.components.PhotoSources.rects[j.id]
+                if (r != null && (r.top < 0f || r.bottom > screenH)) scope.launch { yoScroll.scrollBy(r.center.y - screenH / 2f) }
+            },
         )
     }
 
@@ -441,10 +449,12 @@ private fun AccountMenu(onLogout: () -> Unit, onDelete: () -> Unit) {
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
                 text = { Text("Cerrar sesión", style = BuddyType.Body, color = BuddyColor.Ink) },
+                leadingIcon = { Icon(Icons.AutoMirrored.Filled.Logout, null, tint = BuddyColor.Ink) },
                 onClick = { expanded = false; onLogout() },
             )
             DropdownMenuItem(
                 text = { Text("Eliminar mi cuenta", style = BuddyType.Body, color = BuddyColor.ErrorRed) },
+                leadingIcon = { Icon(Icons.Outlined.Delete, null, tint = BuddyColor.ErrorRed) },
                 onClick = { expanded = false; onDelete() },
             )
         }
@@ -462,7 +472,7 @@ private fun ProfileHeader(
         // Avatar tapeable para cambiar la foto — espejo del PhotosPicker (iOS)
         Box(Modifier.clickable(enabled = !state.isUploadingAvatar, onClick = onPickAvatar)) {
             Box(
-                Modifier.size(88.dp).clip(CircleShape).background(BuddyColor.GroupedBg),
+                Modifier.size(88.dp).clip(CircleShape).background(BuddyColor.PaleSage),
                 contentAlignment = Alignment.Center,
             ) {
                 if (state.user?.avatarUrl != null) {
@@ -485,16 +495,17 @@ private fun ProfileHeader(
             Box(
                 Modifier
                     .align(Alignment.BottomEnd)
-                    .size(26.dp)
-                    .background(BuddyColor.Ink, CircleShape),
+                    .size(28.dp)
+                    .background(BuddyColor.Brand, CircleShape)
+                    .border(2.dp, BuddyColor.Canvas, CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Filled.CameraAlt, contentDescription = "Cambiar foto", Modifier.size(11.dp), tint = BuddyColor.InkInverse)
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(state.user?.fullName ?: "Tú", style = BuddyType.Title3, color = BuddyColor.Ink, maxLines = 1)
-            Text(state.metaLine, style = BuddyType.Subhead, color = BuddyColor.InkMuted)
+            // Sin contadores (iOS, Keyla 20 Nov 2026: "unnecessary").
+            Text(state.user?.fullName ?: "Tú", style = BuddyType.Title3.copy(fontSize = 22.sp), color = BuddyColor.Ink, maxLines = 1)
             memberSinceLabel(state.user?.memberSince)?.let {
                 Text("Viajando desde $it", style = BuddyType.Caption1, color = BuddyColor.InkMuted)
             }
@@ -723,18 +734,18 @@ private fun LugaresQueRecomiendasSection(
             if (puedeRecomendar) {
                 Column(
                     Modifier
-                        .size(width = 119.dp, height = 142.dp)
+                        .size(width = 132.dp, height = 158.dp)
                         .clip(RoundedCornerShape(Radius.md))
                         .background(BuddyColor.Surface)
                         // Punteado: se lee como un hueco por llenar y no como un
                         // lugar más ya aportado.
                         .drawBehind {
                             drawRoundRect(
-                                color = BuddyColor.Border,
+                                color = BuddyColor.Sage,
                                 style = androidx.compose.ui.graphics.drawscope.Stroke(
-                                    width = 1.dp.toPx(),
+                                    width = 1.5.dp.toPx(),
                                     pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
-                                        floatArrayOf(5.dp.toPx(), 4.dp.toPx()), 0f,
+                                        floatArrayOf(6.dp.toPx(), 4.dp.toPx()), 0f,
                                     ),
                                 ),
                                 cornerRadius = androidx.compose.ui.geometry.CornerRadius(Radius.md.toPx()),
@@ -744,16 +755,18 @@ private fun LugaresQueRecomiendasSection(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    Icon(Icons.Filled.Add, null, Modifier.size(22.dp), tint = BuddyColor.Brand)
+                    Box(Modifier.size(44.dp).background(BuddyColor.SageTint, CircleShape), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.Add, null, Modifier.size(22.dp), tint = BuddyColor.Brand)
+                    }
                     Spacer(Modifier.height(8.dp))
-                    Text("Añadir lugar", style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+                    Text("Añadir lugar", style = BuddyType.FootnoteBold, color = BuddyColor.Brand)
                 }
             }
 
             shares.forEach { lugar ->
                 Column(
                     Modifier
-                        .size(width = 119.dp, height = 142.dp)
+                        .size(width = 132.dp, height = 158.dp)
                         .clip(RoundedCornerShape(Radius.md))
                         .background(BuddyColor.SurfaceRaised)
                         .clickable { onOpenPlace(lugar) },
@@ -810,7 +823,7 @@ private fun TripsSection(
     onOpenStory: (ApiJourney) -> Unit = {},
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
-        SectionHeader("TRIPS", state.journeys.size)
+        SectionHeader("TRIPS PUBLICADOS", state.journeys.size)
         if (state.journeys.isEmpty()) {
             Column(
                 Modifier
@@ -823,8 +836,10 @@ private fun TripsSection(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(Spacing.sm),
             ) {
-                Icon(Icons.Filled.AddCircleOutline, contentDescription = null, Modifier.size(32.dp), tint = BuddyColor.InkMuted)
-                Text("Tu primer trip te espera", style = BuddyType.Callout, color = BuddyColor.InkMuted)
+                Box(Modifier.size(48.dp).background(BuddyColor.PaleSage, CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.Add, contentDescription = null, Modifier.size(22.dp), tint = BuddyColor.Brand)
+                }
+                Text("Tu primer trip te espera", style = BuddyType.FootnoteBold, color = BuddyColor.Ink)
             }
         } else {
             val remainder = state.journeys.size % 3
@@ -840,7 +855,8 @@ private fun TripsSection(
                                         journey = cell.journey,
                                         onTap = { onOpenStory(cell.journey) },
                                         onDeleteRequest = { onDeleteRequest(cell.journey) },
-                                        modifier = Modifier.weight(1f),
+                                        modifier = Modifier.weight(1f)
+                                            .then(com.buddy.app.core.designsystem.components.photoSourceModifier(cell.journey.id)),
                                     )
                                     TripCell.Ghost -> Box(
                                         Modifier
@@ -871,88 +887,54 @@ private sealed interface TripCell {
 }
 
 /**
- * Visor de historia publicada — espejo de StoryViewerSheet (iOS): pantalla
- * completa fondo Canvas, pager de portadas (fit), dots en cápsula y X para
- * cerrar. Sin conteos ni chrome extra: solo las fotos.
+ * Visor de publicaciones: el mismo de toda la app (PhotoViewer, regla 26). Con
+ * una lista, al terminar las fotos sigue con la siguiente publicación y hacia
+ * arriba salta al siguiente trip (como iOS, Keyla 21 nov 2026).
  */
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun StoryViewerDialog(
+internal fun StoryViewerDialog(
     journey: ApiJourney,
-    thumbsProvider: suspend () -> List<String>,
+    thumbsProvider: suspend (ApiJourney) -> List<String>,
     onDismiss: () -> Unit,
+    journeys: List<ApiJourney> = listOf(journey),
+    /** La publicación que se ve (el perfil se desplaza para tener su miniatura en pantalla). */
+    onShowingJourney: (ApiJourney) -> Unit = {},
+    /** Para filas donde la misma publicación puede estar dos veces (Comunidad). */
+    sourceKeyPrefix: String = "",
 ) {
-    androidx.compose.ui.window.Dialog(
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
-    ) {
-        val thumbs by androidx.compose.runtime.produceState(emptyList<String>(), journey.id) {
-            value = thumbsProvider()
-        }
-        Box(Modifier.fillMaxSize().background(BuddyColor.Canvas)) {
-            if (thumbs.isEmpty()) {
-                // Fallback: cover del destino mientras cargan (o si no hay páginas)
-                AsyncImage(
-                    model = journey.destination?.coverUrl,
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            } else {
-                val pagerState = androidx.compose.foundation.pager.rememberPagerState { thumbs.size }
-                androidx.compose.foundation.pager.HorizontalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxSize(),
-                ) { i ->
-                    AsyncImage(
-                        model = thumbs[i],
-                        contentDescription = null,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-                if (thumbs.size > 1) {
-                    Row(
-                        Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 24.dp)
-                            .clip(RoundedCornerShape(50))
-                            .background(BuddyColor.Surface.copy(alpha = 0.85f))
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(7.dp),
-                    ) {
-                        repeat(thumbs.size) { i ->
-                            Box(
-                                Modifier
-                                    .size(7.dp)
-                                    .background(
-                                        if (i == pagerState.currentPage) BuddyColor.Ink
-                                        else BuddyColor.Ink.copy(alpha = 0.25f),
-                                        CircleShape,
-                                    ),
-                            )
-                        }
-                    }
-                }
-            }
-            // Solo el botón de cerrar — sin conteos (como iOS)
-            Box(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 8.dp, end = Spacing.edge)
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(BuddyColor.Surface.copy(alpha = 0.85f))
-                    .clickable(onClick = onDismiss),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.Close, contentDescription = "Cerrar",
-                    Modifier.size(15.dp), tint = BuddyColor.Ink,
-                )
-            }
-        }
+    val list = journeys.ifEmpty { listOf(journey) }
+    val start = list.indexOfFirst { it.id == journey.id }.coerceAtLeast(0)
+    // Fotos de cada publicación (las que no vienen en la lista se piden).
+    val groups by androidx.compose.runtime.produceState<List<List<String>>?>(null, list.map { it.id }) {
+        value = list.map { j -> j.pageThumbs?.takeIf { it.isNotEmpty() } ?: runCatching { thumbsProvider(j) }.getOrDefault(emptyList()) }
     }
+    val g = groups
+    if (g == null) {
+        androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss,
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+            Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = androidx.compose.ui.graphics.Color.White, strokeWidth = 2.dp)
+            }
+        }
+        return
+    }
+    val pages = com.buddy.app.core.designsystem.components.ViewerPages.make(g) { list[it].destination?.coverUrl }
+    com.buddy.app.core.designsystem.components.PhotoViewerDialog(
+        pages = pages,
+        startPage = com.buddy.app.core.designsystem.components.ViewerPages.firstOf(pages, start).coerceAtLeast(0),
+        onDismiss = onDismiss,
+        // Abre y cierra desde la miniatura de cada publicación (como iOS).
+        sourceKey = { sourceKeyPrefix + list[it.group].id },
+        onShowing = { onShowingJourney(list[it.group]) },
+        headerFor = { i ->
+            val j = list[i]
+            com.buddy.app.core.designsystem.components.ViewerHeader(
+                title = com.buddy.app.features.community.CommunityLogic.capitalized(j.users?.fullName),
+                subtitle = j.destination?.name ?: j.title,
+                avatarUrl = j.users?.avatarUrl,
+            )
+        },
+    )
 }
 
 /**
@@ -1048,7 +1030,6 @@ private fun AnonymousProfileState(
             AnonymousBenefit(Icons.Filled.Person, "Tus viajes", "Cada destino pasa a ser parte de tu historia.")
             AnonymousBenefit(Icons.Filled.CameraAlt, "Tus momentos", "Las fotos y recuerdos que guardaste te siguen a donde vayas.")
             AnonymousBenefit(Icons.Filled.Star, "Tus stickers", "Recuerdos de los lugares que te recibieron.")
-            AnonymousBenefit(Icons.Filled.HowToReg, "Tu perfil de Buddy", "Si decides ayudar a otros viajeros, puedes configurarlo desde aquí.")
         }
         Spacer(Modifier.height(Spacing.md))
         HorizontalDivider(color = BuddyColor.Border)
@@ -1100,6 +1081,31 @@ private fun AnonymousBenefit(icon: androidx.compose.ui.graphics.vector.ImageVect
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, style = BuddyType.FootnoteBold, color = BuddyColor.Ink)
             Text(subtitle, style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+        }
+    }
+}
+
+
+/** Entrada a "Mis trips" en Yo: misma tarjeta que iOS MyTripsEntryCard. */
+@Composable
+private fun MyTripsEntryCard(onOpen: () -> Unit, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.Row(
+        modifier.fillMaxWidth()
+            .shadow(6.dp, RoundedCornerShape(16.dp), ambientColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.05f), spotColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.05f))
+            .clip(RoundedCornerShape(16.dp)).background(BuddyColor.Surface)
+            .clickable(onClick = onOpen).padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(Modifier.size(44.dp).background(BuddyColor.PaleSage, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+            Icon(androidx.compose.material.icons.Icons.Outlined.WorkOutline, null, tint = BuddyColor.Brand, modifier = Modifier.size(22.dp))
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text("Mis trips", style = BuddyType.Headline.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = BuddyColor.Brand)
+            Text("Registra tu próximo trip y sigue el que está en curso", style = BuddyType.Footnote, color = BuddyColor.InkMuted)
+        }
+        Box(Modifier.size(32.dp).background(BuddyColor.SageTint, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = BuddyColor.Brand, modifier = Modifier.size(20.dp))
         }
     }
 }

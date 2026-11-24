@@ -26,7 +26,15 @@ import android.graphics.drawable.Drawable
  * Se dibuja a Canvas y no con un vector: el pin cambia de tamaño, de grosor de
  * borde y de contenido según el estado, y son cuatro primitivas.
  */
-fun pinDeLugar(contexto: Context, nombre: String, seleccionado: Boolean): Drawable {
+fun pinDeLugar(
+    contexto: Context,
+    nombre: String,
+    seleccionado: Boolean,
+    /** Por defecto solo el elegido lleva nombre (mapa del destino). El selector
+     *  de "Buscar en el mapa" lo pide siempre: ahí el nombre ES la pista para
+     *  saber si el lugar ya existe. */
+    conNombre: Boolean = seleccionado,
+): Drawable {
     val d = contexto.resources.displayMetrics.density
     fun px(dp: Float) = dp * d
 
@@ -43,7 +51,7 @@ fun pinDeLugar(contexto: Context, nombre: String, seleccionado: Boolean): Drawab
 
     // El texto se recorta antes de medir el lienzo: un nombre largo estiraría el
     // bitmap a lo ancho y el pin quedaría descentrado sobre su punto.
-    val texto = if (seleccionado) recortar(nombre, etiqueta, px(150f)) else null
+    val texto = if (conNombre) recortar(nombre, etiqueta, px(if (seleccionado) 150f else 110f)) else null
     val anchoTexto = texto?.let { etiqueta.measureText(it) } ?: 0f
     val altoEtiqueta = if (texto != null) px(19f) else 0f
     val separacion = if (texto != null) px(3f) else 0f
@@ -99,11 +107,11 @@ fun pinDeLugar(contexto: Context, nombre: String, seleccionado: Boolean): Drawab
 /** Dónde cae el punto real dentro del bitmap: el centro del círculo, no el del
  *  lienzo — con etiqueta debajo, anclar al centro dejaría el pin flotando por
  *  encima de su propia coordenada. */
-fun anclaVerticalDelPin(contexto: Context, seleccionado: Boolean): Float {
+fun anclaVerticalDelPin(contexto: Context, seleccionado: Boolean, conNombre: Boolean = seleccionado): Float {
     val d = contexto.resources.displayMetrics.density
     val diametro = (if (seleccionado) 40f else 33f) * d
     val sombra = (if (seleccionado) 8f else 3f) * d
-    val alto = if (seleccionado) diametro + sombra * 2 + 3f * d + 19f * d else diametro + sombra * 2
+    val alto = if (conNombre) diametro + sombra * 2 + 3f * d + 19f * d else diametro + sombra * 2
     return (sombra + diametro / 2f) / alto
 }
 

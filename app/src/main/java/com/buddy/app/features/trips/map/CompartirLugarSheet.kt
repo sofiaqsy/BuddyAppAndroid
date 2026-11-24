@@ -305,7 +305,7 @@ private fun textoParaFuera(card: ChatCard.Place): String {
     val presentacion = if (autor != null) {
         "$autor recomendó este lugar en Buddy. Míralo aquí:"
     } else {
-        "Un buddy recomendó este lugar. Míralo aquí:"
+        "Te recomiendo este lugar. Míralo aquí:"
     }
     return "📍 ${card.name}\n$presentacion\n${enlacePublico(card)}"
 }

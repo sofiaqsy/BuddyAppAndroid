@@ -13,6 +13,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.input.pointer.pointerInput
@@ -76,6 +83,11 @@ fun BuddyRoot() {
     /** Sube con cada re-tap del tab Trips: la pantalla vuelve arriba y
      *  recarga las historias. */
     var tripsScrollToTop by androidx.compose.runtime.remember { mutableStateOf(0) }
+    // Tocar Inicio estando en Inicio: otro orden y productos de nuevo (iOS).
+    var inicioReselect by androidx.compose.runtime.remember { mutableStateOf(0) }
+    /** "Mis trips" (Yo): los trips propios viven aquí desde que la pestaña
+     *  pasó a ser Comunidad (Keyla, 19-20 Nov 2026, igual que iOS). */
+    var misTripsOpen by androidx.compose.runtime.remember { mutableStateOf(false) }
 
     // Mismo ViewModel (scope de Activity) que usa el tab Conexiones —
     // el badge refleja chatStore.totalUnread como en iOS.
@@ -174,7 +186,10 @@ fun BuddyRoot() {
                 selected = selectedTab,
                 unreadChats = conexionesState.totalUnread,
                 onSelect = { selectedTab = it },
-                onReselect = { tab -> if (tab == AppTab.Trips) tripsScrollToTop++ },
+                onReselect = { tab ->
+                    if (tab == AppTab.Trips) tripsScrollToTop++
+                    if (tab == AppTab.Inicio) inicioReselect++
+                },
             )
         },
     ) { padding ->
@@ -194,8 +209,11 @@ fun BuddyRoot() {
         androidx.compose.runtime.key(tab) {
         Box(Modifier.fillMaxSize().soloSiVisible(tab == selectedTab)) {
         when (tab) {
+            // Inicio dibuja la portada detrás de la hora (igual que iOS): solo
+            // recibe el margen de la barra de tabs, no el de arriba.
             AppTab.Inicio -> InicioScreen(
-                modifier,
+                Modifier.padding(bottom = padding.calculateBottomPadding()),
+                reselectToken = inicioReselect,
                 onOpenTrips = { selectedTab = AppTab.Trips },
                 onOpenConexiones = { selectedTab = AppTab.Conexiones },
                 onOpenChat = { matchId, category ->
@@ -231,39 +249,24 @@ fun BuddyRoot() {
                     }
                 },
             )
-            AppTab.Trips -> TripsScreen(
-                modifier,
-                onOpenPlace = { card ->
-                    val destId = card.destinationId
-                    if (destId != null) {
-                        mapSpotId = card.id.takeIf { it != destId }
-                        mapJourney = com.buddy.app.core.data.model.ApiJourney(
-                            id = card.id,
-                            title = card.destinationName ?: card.name,
-                            status = "active",
-                            destination = com.buddy.app.core.data.model.ApiDestinationRef(
-                                id = destId,
-                                name = card.destinationName ?: card.name,
-                                city = card.destinationName ?: card.name,
-                                lat = card.lat, lng = card.lng,
-                            ),
-                            destinationId = destId,
-                        )
-                    }
-                },
-                onOpenConexiones = { selectedTab = AppTab.Conexiones },
-                onOpenBook = { journey, page, isStandaloneShare -> bookJourney = Triple(journey, page, isStandaloneShare) },
-                onOpenMap = { mapJourney = it; mapSpotId = null },
-                onPublished = { selectedTab = AppTab.Inicio },
-                isApprovedBuddy = conexionesState.isApprovedBuddy,
+            AppTab.Trips -> com.buddy.app.features.community.CommunityScreen(
+                modifier = Modifier.padding(bottom = padding.calculateBottomPadding()),
                 onOpenProfile = { id, nombre, avatar -> perfilAbierto = Triple(id, nombre, avatar) },
+                onOpenDestination = { destId, name ->
+                    mapSpotId = null
+                    mapJourney = com.buddy.app.core.data.model.ApiJourney(
+                        id = destId, title = name, status = "active",
+                        destination = com.buddy.app.core.data.model.ApiDestinationRef(id = destId, name = name, city = name),
+                        destinationId = destId,
+                    )
+                },
                 scrollToTopToken = tripsScrollToTop,
-                onOpenChat = { matchId -> openChatCategory = null; openChatId = matchId },
             )
-            AppTab.Conexiones -> ConexionesScreen(modifier, onOpenTrips = { selectedTab = AppTab.Trips })
+            // Sin trips en Conexiones (Keyla, 23 Nov 2026): el botón lleva a Inicio.
+            AppTab.Conexiones -> ConexionesScreen(modifier, onOpenTrips = { selectedTab = AppTab.Inicio })
             AppTab.Yo -> YoScreen(
                 modifier,
-                onOpenTrips = { selectedTab = AppTab.Trips },
+                onOpenTrips = { misTripsOpen = true },
                 onOpenPlace = { card ->
                     val destId = card.destinationId
                     if (destId != null) {
@@ -299,6 +302,51 @@ fun BuddyRoot() {
     //
     // Se come los toques: si no, tocar una zona vacía del perfil llegaría a lo
     // que hay detrás.
+    // "Mis trips" a pantalla completa, encima de la app (abre desde Yo).
+    if (misTripsOpen) {
+        Box(Modifier.fillMaxSize().background(BuddyColor.Canvas).pointerInput(Unit) {}) {
+            com.buddy.app.core.designsystem.components.SwipeBackScreen(onBack = { misTripsOpen = false }) {
+                Column(Modifier.fillMaxSize().windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.Companion.statusBars)) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                        androidx.compose.material3.IconButton(onClick = { misTripsOpen = false }) {
+                            androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.ArrowBack, "Volver", tint = BuddyColor.Brand)
+                        }
+                    }
+                TripsScreen(
+                    Modifier,
+                    embedded = true,
+                onOpenPlace = { card ->
+                    val destId = card.destinationId
+                    if (destId != null) {
+                        mapSpotId = card.id.takeIf { it != destId }
+                        mapJourney = com.buddy.app.core.data.model.ApiJourney(
+                            id = card.id,
+                            title = card.destinationName ?: card.name,
+                            status = "active",
+                            destination = com.buddy.app.core.data.model.ApiDestinationRef(
+                                id = destId,
+                                name = card.destinationName ?: card.name,
+                                city = card.destinationName ?: card.name,
+                                lat = card.lat, lng = card.lng,
+                            ),
+                            destinationId = destId,
+                        )
+                    }
+                },
+                onOpenConexiones = { selectedTab = AppTab.Conexiones },
+                onOpenBook = { journey, page, isStandaloneShare -> bookJourney = Triple(journey, page, isStandaloneShare) },
+                onOpenMap = { mapJourney = it; mapSpotId = null },
+                onPublished = { selectedTab = AppTab.Inicio },
+                isApprovedBuddy = conexionesState.isApprovedBuddy,
+                onOpenProfile = { id, nombre, avatar -> perfilAbierto = Triple(id, nombre, avatar) },
+                scrollToTopToken = tripsScrollToTop,
+                onOpenChat = { matchId -> openChatCategory = null; openChatId = matchId },
+            )
+                }
+            }
+        }
+    }
+
     perfilAbierto?.let { (id, nombre, avatar) ->
         Box(
             Modifier
@@ -315,7 +363,7 @@ fun BuddyRoot() {
                 previewName = nombre,
                 previewAvatarUrl = avatar,
                 onBack = { perfilAbierto = null },
-                onOpenTrips = { perfilAbierto = null; selectedTab = AppTab.Trips },
+                onOpenTrips = { perfilAbierto = null; misTripsOpen = true },
                 vm = androidx.hilt.navigation.compose.hiltViewModel(key = id),
             )
             }

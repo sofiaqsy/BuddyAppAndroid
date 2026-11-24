@@ -10,11 +10,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -88,16 +86,42 @@ fun CompartirLugarSheet(
      *  respondió. */
     nearbySpots: List<ApiNearbySpot>,
     isPrefetchingNearby: Boolean,
-    searchResults: List<ApiNearbySpot>,
+    /** Dónde está el buddy: el mapa de "Buscar en el mapa" nace centrado ahí. */
+    userLat: Double?,
+    userLng: Double?,
     categories: List<ApiSpotCategoryRef>,
     isSubmitting: Boolean,
     errorMessage: String?,
     onDismiss: () -> Unit,
     onStep: (ShareLugarStep) -> Unit,
     onPickSpot: (ApiNearbySpot) -> Unit,
-    onQueryChange: (String) -> Unit,
     onPropose: (nombre: String, categoriaId: String?) -> Unit,
+    /** Un lugar nuevo en el punto que el buddy marcó en el mapa. */
+    onProposeAt: (nombre: String, categoriaId: String?, lat: Double, lng: Double) -> Unit,
 ) {
+    // El mapa es una pantalla completa, no un paso más dentro de la hoja: una
+    // hoja a media altura deja el mapa sin espacio para moverse.
+    if (step == ShareLugarStep.Map) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { onStep(ShareLugarStep.Choose) },
+            properties = androidx.compose.ui.window.DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false,
+            ),
+        ) {
+            com.buddy.app.features.trips.map.ElegirLugarEnMapa(
+                initialLat = userLat,
+                initialLng = userLng,
+                categories = categories,
+                isSubmitting = isSubmitting,
+                errorMessage = errorMessage,
+                onBack = { onStep(ShareLugarStep.Choose) },
+                onPickSpot = onPickSpot,
+                onProposeAt = onProposeAt,
+            )
+        }
+        return
+    }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.padding(horizontal = Spacing.edge).padding(bottom = Spacing.lg)) {
             Text("Compartir un lugar", style = BuddyType.Title3, color = BuddyColor.Ink)
@@ -139,7 +163,7 @@ fun CompartirLugarSheet(
                     // texto no sirve — si no está aquí, tampoco está en el mapa.
                     optionRow(
                         icon = Icons.Filled.AddCircle,
-                        title = "Registrar nuevo lugar",
+                        title = "Registrar lugar de la ubicación actual",
                         subtitle = when {
                             nearbySpots.isNotEmpty() -> "ninguno de estos es"
                             isPrefetchingNearby -> "buscando…"
@@ -151,76 +175,17 @@ fun CompartirLugarSheet(
                     )
                     Spacer(Modifier.height(Spacing.sm))
                     optionRow(
-                        icon = Icons.Filled.Search,
-                        title = "Buscar otro lugar",
-                        subtitle = null,
+                        icon = Icons.Filled.Map,
+                        title = "Buscar en el mapa",
+                        subtitle = "elige un punto o un lugar existente",
                         isLoading = false,
                         enabled = !isSubmitting,
-                        onClick = { onStep(ShareLugarStep.Search) },
+                        onClick = { onStep(ShareLugarStep.Map) },
                     )
                 }
 
-                ShareLugarStep.Search -> {
-                    var query by remember { mutableStateOf("") }
-                    BuddyTextField(
-                        value = query,
-                        onValueChange = { query = it; onQueryChange(it) },
-                        placeholder = "Buscar en tus lugares",
-                        // Todo el ancho: sin esto el campo quedaba en el
-                        // ancho mínimo de Material, la mitad de la pantalla.
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Spacer(Modifier.height(Spacing.sm))
-
-                    if (query.trim().length >= 2 && searchResults.isEmpty()) {
-                        Column(
-                            Modifier.fillMaxWidth().padding(vertical = Spacing.lg),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-                        ) {
-                            Text("Ningún lugar del catálogo coincide", style = BuddyType.Footnote, color = BuddyColor.InkMuted)
-                            Text(
-                                "Registrarlo como nuevo",
-                                style = BuddyType.FootnoteBold, color = BuddyColor.Ink,
-                                modifier = Modifier.clickable { onStep(ShareLugarStep.Propose) },
-                            )
-                        }
-                    }
-
-                    LazyColumn(Modifier.height(320.dp)) {
-                        items(searchResults, key = { it.id }) { spot ->
-                            BuddyGroupedRow(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = Spacing.xs),
-                                onClick = { if (!isSubmitting) onPickSpot(spot) },
-                            ) {
-                                Column {
-                                    Text(spot.name, style = BuddyType.Body, color = BuddyColor.Ink)
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    ) {
-                                        Text(spot.distanciaLabel, style = BuddyType.Caption1, color = BuddyColor.InkMuted)
-                                        if (spot.estaPendiente) {
-                                            Text(
-                                                "por revisar",
-                                                style = BuddyType.Caption2, color = BuddyColor.InkMuted,
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(50))
-                                                    .background(BuddyColor.InkMuted.copy(alpha = 0.12f))
-                                                    .padding(horizontal = 6.dp, vertical = 2.dp),
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if (isSubmitting) {
-                        Box(Modifier.fillMaxWidth().padding(Spacing.md), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(modifier = Modifier.size(22.dp))
-                        }
-                    }
-                }
+                // El paso Map no se dibuja aquí: es pantalla completa (arriba).
+                ShareLugarStep.Map -> Unit
 
                 // Sin spots cerca: el buddy NOMBRA el lugar. Queda pendiente de
                 // aprobación en el admin, pero puede documentarlo desde ya.
@@ -305,7 +270,7 @@ fun CompartirLugarSheet(
                         style = BuddyType.Footnote, color = BuddyColor.InkMuted,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onStep(ShareLugarStep.Search) }
+                            .clickable { onStep(ShareLugarStep.Map) }
                             .padding(vertical = 4.dp),
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     )
@@ -344,4 +309,4 @@ private fun optionRow(
     }
 }
 
-enum class ShareLugarStep { Choose, Search, Propose }
+enum class ShareLugarStep { Choose, Map, Propose }

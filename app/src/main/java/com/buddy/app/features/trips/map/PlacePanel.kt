@@ -47,6 +47,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import coil.compose.AsyncImage
 import com.buddy.app.core.data.model.ApiPlaceBuddy
 import com.buddy.app.core.designsystem.BuddyColor
@@ -77,10 +79,12 @@ fun PlacePhotoCard(
     index: Int,
     isSelected: Boolean,
     onClick: () -> Unit,
+    /** Dos tarjetas llenan el ancho del panel (Keyla, 23 Nov 2026). */
+    width: androidx.compose.ui.unit.Dp = 145.dp,
 ) {
     Column(
         Modifier
-            .width(145.dp)
+            .width(width)
             .clip(RoundedCornerShape(14.dp))
             .background(Color.White)
             .then(
@@ -90,7 +94,7 @@ fun PlacePhotoCard(
             )
             .clickable(onClick = onClick),
     ) {
-        Box(Modifier.fillMaxWidth().height(90.dp)) {
+        Box(Modifier.fillMaxWidth().height(140.dp)) {
             if (spot.coverUrl != null) {
                 AsyncImage(
                     model = spot.coverUrl,
@@ -117,12 +121,12 @@ fun PlacePhotoCard(
         Column(Modifier.padding(horizontal = 8.dp, vertical = 7.dp)) {
             Text(
                 spot.name,
-                fontSize = 12.sp, fontWeight = FontWeight.Bold, color = BuddyColor.Ink,
+                fontSize = 14.sp, fontWeight = FontWeight.Bold, color = BuddyColor.Ink,
                 maxLines = 1,
             )
             Text(
                 spot.categoryName ?: "Lugar",
-                fontSize = 10.sp, color = BuddyColor.InkMuted, maxLines = 1,
+                fontSize = 12.sp, color = BuddyColor.InkMuted, maxLines = 1,
             )
         }
     }
@@ -140,8 +144,9 @@ fun PlacePhotoCard(
  * recomendación: elegir un lugar en "Compartir un lugar" no escribe nada, solo
  * trae aquí.
  */
+/** Versión anterior (pestañas Fotos, Info, Buddies), ya no se muestra. */
 @Composable
-fun PlaceGuideDetail(
+fun PlaceGuideDetailOld(
     spot: ApiGuideSpot,
     presenceText: String?,
     fotos: List<FotoDeLugar>,
@@ -256,7 +261,7 @@ fun PlaceGuideDetail(
         HorizontalDivider(color = BuddyColor.Hairline)
 
         when (tab) {
-            0 -> FotosTab(fotos, isLoadingFotos, canRecommend, onAddPhoto, onOpenPhoto)
+            0 -> FotosTabOld(fotos, isLoadingFotos, canRecommend, onAddPhoto, onOpenPhoto)
             1 -> InfoTab(spot)
             else -> BuddiesTab(buddies, isLoadingBuddies, onOpenBuddy)
         }
@@ -264,7 +269,7 @@ fun PlaceGuideDetail(
 }
 
 @Composable
-private fun FotosTab(
+private fun FotosTabOld(
     fotos: List<FotoDeLugar>,
     isLoading: Boolean,
     canRecommend: Boolean,
@@ -278,8 +283,16 @@ private fun FotosTab(
 
         fotos.isEmpty() && !canRecommend -> EstadoVacio("Todavía no hay fotos de este lugar")
 
-        else -> LazyRow(
+        else -> {
+            val rowState = androidx.compose.foundation.lazy.rememberLazyListState()
+            // La miniatura de la foto que se ve, en pantalla: al cerrar vuelve a ella.
+            com.buddy.app.core.designsystem.components.FollowViewer(rowState) { k ->
+                val i = fotos.indexOfFirst { it.url == k }
+                if (i < 0) -1 else i + (if (canRecommend) 1 else 0)
+            }
+            LazyRow(
             Modifier.fillMaxWidth().padding(top = 16.dp),
+            state = rowState,
             contentPadding = PaddingValues(horizontal = 20.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -313,9 +326,11 @@ private fun FotosTab(
                         .size(115.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(BuddyColor.SurfaceRaised)
+                        .then(com.buddy.app.core.designsystem.components.photoSourceModifier(foto.url))
                         .clickable { onOpenPhoto(foto) },
                 )
             }
+        }
         }
     }
 }

@@ -29,7 +29,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.material.icons.automirrored.filled.DirectionsWalk
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -146,19 +145,6 @@ fun TripFeedCard(
             },
         )
     }
-    var showComoLlegar by remember { mutableStateOf(false) }
-    val destLat = journey.destination?.lat
-    val destLng = journey.destination?.lng
-
-    if (showComoLlegar && destLat != null && destLng != null) {
-        com.buddy.app.core.navigation.ComoLlegarDialog(
-            placeName = destName,
-            lat = destLat,
-            lng = destLng,
-            onDismiss = { showComoLlegar = false },
-        )
-    }
-
     Column(
         modifier
             .fillMaxWidth()
@@ -203,24 +189,6 @@ fun TripFeedCard(
                 Text(destName, style = BuddyType.Headline, color = BuddyColor.Ink)
                 if (destCity.isNotEmpty() && destCity != destName) {
                     Text(destCity, style = BuddyType.Caption1, color = BuddyColor.InkMuted)
-                }
-            }
-            // Cómo llegar — abre Google Maps / Waze (espejo del botón de iOS)
-            if (destLat != null && destLng != null) {
-                Box(
-                    Modifier
-                        .size(32.dp)
-                        .clip(CircleShape)
-                        .background(BuddyColor.GroupedBg)
-                        .clickable { showComoLlegar = true },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.DirectionsWalk,
-                        contentDescription = "Cómo llegar a $destName",
-                        Modifier.size(16.dp),
-                        tint = BuddyColor.Brand,
-                    )
                 }
             }
             StatusBadge(journey)
@@ -313,7 +281,7 @@ fun TripFeedCard(
 
         // ── Fila del buddy — SOLO con buddy asignado en trip activo ───────
         // Sin match no hay a quién preguntarle la duda: la fila se oculta.
-        if (journey.status == "active" && buddyName != null) {
+        if (com.buddy.app.core.Features.SHOWS_BUDDY_TOOLS && journey.status == "active" && buddyName != null) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -350,9 +318,9 @@ private fun StatusBadge(journey: ApiJourney) {
             // siempre en "Desde hoy" — usar created_at como respaldo real.
             val days = daysSince(journey.arrivalAt ?: journey.createdAt)
             val text = when {
-                days == null || days <= 0 -> "Desde hoy"
-                days == 1 -> "Desde hace 1 día"
-                else -> "Desde hace $days días"
+                days == null || days <= 0 -> "Hoy"
+                days == 1 -> "Hace 1 día"
+                else -> "Hace $days días"
             }
             text to BuddyColor.Brand
         }

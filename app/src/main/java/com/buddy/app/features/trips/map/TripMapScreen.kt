@@ -28,6 +28,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -41,6 +43,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.pointer.pointerInput
@@ -93,8 +101,14 @@ class TripMapViewModel @Inject constructor(
     suspend fun buddyCount(destinationId: String): Int? =
         runCatching { homeApi.placeContext(destinationId, "destination").buddies }.getOrNull()
 
-    suspend fun fotos(spotId: String): List<FotoDeLugar> =
-        runCatching { mapApi.spotGallery(spotId).fotos() }.getOrDefault(emptyList())
+    /** Fotos del lugar: primero las del dueño (portada primero, como iOS Fotos),
+     *  después las de los visitantes, sin repetir. */
+    suspend fun fotos(spotId: String): List<FotoDeLugar> {
+        val owner = runCatching { mapApi.ownerPhotos(spotId.lowercase()).photos }.getOrDefault(emptyList())
+            .sortedBy { it.position }.map { FotoDeLugar(it.url, null) }
+        val gallery = runCatching { mapApi.spotGallery(spotId).fotos() }.getOrDefault(emptyList())
+        return (owner + gallery).distinctBy { it.url }
+    }
 
     suspend fun coordenadas(destinationId: String): Pair<Double, Double>? =
         runCatching { mapApi.destination(destinationId).let { it.lat to it.lng } }.getOrNull()
@@ -105,6 +119,10 @@ class TripMapViewModel @Inject constructor(
         runCatching { tripRepo.shareLugar(spotId = spotId, lat = lat, lng = lng) }
             .onFailure { android.util.Log.e("TripMap", "crearRecomendacion falló", it) }
             .getOrNull()
+
+    /** Productos del lugar (vacío si no tiene negocio o si falla). */
+    suspend fun products(spotId: String): List<com.buddy.app.core.data.model.FincasProduct> =
+        runCatching { homeApi.spotProducts(spotId.lowercase()).items }.getOrDefault(emptyList())
 
     suspend fun buddies(destinationId: String): List<ApiPlaceBuddy> =
         runCatching { mapApi.destinationBuddies(destinationId).buddies }.getOrDefault(emptyList())
@@ -223,6 +241,20 @@ fun TripMapScreen(
         }
     }
 
+    var products by remember { mutableStateOf<List<com.buddy.app.core.data.model.FincasProduct>>(emptyList()) }
+    var isLoadingProducts by remember { mutableStateOf(false) }
+    LaunchedEffect(selectedSpotId) {
+        val id = selectedSpotId ?: return@LaunchedEffect
+        products = emptyList()
+        isLoadingProducts = true
+        val cargados = withContext(Dispatchers.IO) { viewModel.products(id) }
+        if (selectedSpotId == id) { products = cargados; isLoadingProducts = false }
+    }
+    // "Preguntar al negocio": chat a pantalla completa encima del mapa.
+    var chatTarget by remember { mutableStateOf<com.buddy.app.features.businesschat.BusinessChatTarget?>(null) }
+    // Foto de producto abierta en el visor (todas las del lugar, en orden).
+    var productoAmpliado by remember { mutableStateOf<String?>(null) }
+
     var buddies by remember { mutableStateOf<List<ApiPlaceBuddy>>(emptyList()) }
     var isLoadingBuddies by remember { mutableStateOf(true) }
     LaunchedEffect(destId) {
@@ -233,6 +265,7 @@ fun TripMapScreen(
 
     // Presencia humana — lo único que el mapa no puede mostrar solo (iOS)
     val presenceText = when {
+        !com.buddy.app.core.Features.SHOWS_BUDDY_TOOLS -> null
         buddyCount == null -> null
         buddyCount!! <= 0 -> "Un buddy puede ayudarte si tienes una duda"
         buddyCount == 1 -> "1 buddy aquí, listo si tienes una duda"
@@ -242,6 +275,23 @@ fun TripMapScreen(
     // El panel reserva además la barra de gestos: sin eso la fila de fotos
     // —lo último que se dibuja— quedaba cortada por el borde de la pantalla.
     val insetInferior = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+
+    // Panel que se jala (iOS, 23 Nov 2026). Cerrado: la ficha mide PanelHeight y
+    // la lista lo justo para dos tarjetas; abierto: casi toda la pantalla.
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val screenH = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp
+    val sheet = remember { PanelSheet(scope, with(density) { 30.dp.toPx() }) }
+    val collapsedDp = (if (selectedSpot != null) PanelHeight else ListPanelHeight) + insetInferior
+    val expandedDp = screenH + insetInferior - topInset - 24.dp
+    LaunchedEffect(collapsedDp, expandedDp) {
+        with(density) { sheet.setBounds(collapsedDp.toPx(), expandedDp.toPx()) }
+    }
+    // Cambiar de lugar (o volver a la lista) cierra el panel abierto.
+    LaunchedEffect(selectedSpotId) { if (sheet.expanded) sheet.expand(false) }
+    val panelGrid = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    val placesGrid = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    androidx.activity.compose.BackHandler(enabled = sheet.expanded) { sheet.expand(false) }
 
     val center = remember(destLat, destLng, spots, initialSpotId) {
         val elegido = initialSpotId?.let { id -> spots.firstOrNull { it.id == id } }
@@ -265,8 +315,43 @@ fun TripMapScreen(
         )
     }
 
+    // El mismo visor de toda la app (regla 26): de lado, zoom, abajo cierra.
     fotoAmpliada?.let { foto ->
-        FotoAmpliada(foto = foto, onClose = { fotoAmpliada = null })
+        val urls = fotos.map { it.url }.ifEmpty { listOf(foto.url) }
+        com.buddy.app.core.designsystem.components.PhotoViewerDialog(
+            pages = com.buddy.app.core.designsystem.components.ViewerPages.make(listOf(urls)),
+            startPage = urls.indexOf(foto.url).coerceAtLeast(0),
+            onDismiss = { fotoAmpliada = null },
+            sourceKey = { it.url },
+        )
+    }
+
+    // Como iOS: cada presentación con TODAS sus fotos, una tras otra; arriba el
+    // nombre y "S/ 20 · 250 g · n de m". Abre en la foto que se tocó.
+    productoAmpliado?.let { url ->
+        val entries = products.flatMap { p -> p.entries().map { p to it } }
+        val groups = entries.map { (p, pr) ->
+            val own = pr?.let { listOfNotNull(*it.photos.orEmpty().map { f -> f.url }.toTypedArray(), it.photoUrl) }.orEmpty()
+            own.filter { it.isNotEmpty() }.distinct().ifEmpty { listOfNotNull(p.coverFor(pr)) }
+        }
+        val pages = com.buddy.app.core.designsystem.components.ViewerPages.make(groups).filter { it.url != null }
+        com.buddy.app.core.designsystem.components.PhotoViewerDialog(
+            pages = pages,
+            startPage = pages.indexOfFirst { it.url == url }.coerceAtLeast(0),
+            onDismiss = { productoAmpliado = null },
+            headerFor = { g ->
+                val (p, pr) = entries[g]
+                val price = pr?.price?.let { com.buddy.app.core.data.model.soles(it) }
+                com.buddy.app.core.designsystem.components.ViewerHeader(
+                    title = p.name,
+                    subtitle = listOfNotNull(price, pr?.label?.takeIf { it.isNotEmpty() }).joinToString(" · ").ifEmpty { null },
+                    plain = true,
+                )
+            },
+            // La tarjeta del producto, no la URL: al cerrar en cualquiera de sus
+            // fotos, vuelve a su tarjeta en la fila (como iOS).
+            sourceKey = { pg -> entries.getOrNull(pg.group)?.let { (p, pr) -> productSourceKey(p, pr) } },
+        )
     }
 
     compartiendo?.let { tarjeta ->
@@ -391,12 +476,13 @@ fun TripMapScreen(
                     map.invalidate()
                 },
             )
-            Text(
+            // Con el panel abierto no hay mapa a la vista: el crédito se oculta.
+            if (!sheet.expanded) Text(
                 "© OpenStreetMap",
                 fontSize = 10.sp, color = BuddyColor.InkMuted,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 8.dp, bottom = PanelHeight + insetInferior + 4.dp)
+                    .padding(end = 8.dp, bottom = with(density) { sheet.height.value.toDp() } + 4.dp)
                     .background(Color.White.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
                     .padding(horizontal = 4.dp, vertical = 1.dp),
             )
@@ -433,16 +519,39 @@ fun TripMapScreen(
             ) {
                 Icon(Icons.Filled.ChevronLeft, contentDescription = "Volver", tint = BuddyColor.Ink)
             }
-            Spacer(Modifier.width(12.dp))
-            Text(
-                destName,
-                fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = BuddyColor.Ink,
-                modifier = Modifier
-                    .shadow(4.dp, RoundedCornerShape(50))
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.White)
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-            )
+            // Sin el nombre del destino arriba (Keyla, 23 Nov 2026: innecesario),
+            // igual que iOS: solo el botón de volver.
+            Spacer(Modifier.weight(1f))
+            // Compartir vive en el menú ⋯ de arriba, como iOS, no en la ficha.
+            selectedSpot?.let { spot ->
+                var menu by remember { mutableStateOf(false) }
+                Box {
+                    Box(
+                        Modifier.size(40.dp).shadow(6.dp, CircleShape).clip(CircleShape).background(Color.White)
+                            .clickable { menu = true },
+                        contentAlignment = Alignment.Center,
+                    ) { Icon(Icons.Filled.MoreHoriz, contentDescription = "Más opciones", tint = BuddyColor.Ink) }
+                    androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("Compartir lugar") },
+                            leadingIcon = { Icon(Icons.Filled.Share, null) },
+                            onClick = {
+                                menu = false
+                                compartiendo = com.buddy.app.core.data.model.ChatCard.Place(
+                                    spotId = spot.id,
+                                    destinationId = destId,
+                                    name = spot.name,
+                                    category = spot.categoryName,
+                                    photoUrl = fotos.firstOrNull()?.url ?: spot.coverUrl,
+                                    lat = spot.lat,
+                                    lng = spot.lng,
+                                    authorName = fotos.firstOrNull()?.autor,
+                                )
+                            },
+                        )
+                    }
+                }
+            }
         }
 
         // ── Panel inferior: rail de lugares o ficha del elegido ──────────────
@@ -450,12 +559,41 @@ fun TripMapScreen(
             Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .height(PanelHeight + insetInferior)
+                .height(with(density) { sheet.height.value.toDp() })
                 .shadow(14.dp, RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
                 .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
                 .background(Color.White)
-                .padding(bottom = insetInferior),
+                .padding(bottom = insetInferior)
+                // Todo el panel se jala hacia arriba o abajo; las listas de
+                // adentro le pasan el gesto cuando ya están arriba del todo.
+                .nestedScroll(sheet.nestedScroll)
+                .draggable(
+                    state = androidx.compose.foundation.gestures.rememberDraggableState { d -> sheet.dragBy(d) },
+                    orientation = androidx.compose.foundation.gestures.Orientation.Vertical,
+                    onDragStarted = { sheet.start() },
+                    onDragStopped = { v -> sheet.settle(v) },
+                )
+                // Deslizar a la derecha sobre el panel vuelve atrás, como iOS
+                // (Keyla, 21 nov 2026). Las filas de fotos que se desplazan de
+                // lado consumen su propio arrastre, así que no vuelven.
+                .pointerInput(Unit) {
+                    var dx = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { dx = 0f },
+                        onHorizontalDrag = { _: androidx.compose.ui.input.pointer.PointerInputChange, a: Float -> dx += a },
+                        onDragEnd = { if (dx > 90.dp.toPx()) onBack() },
+                    )
+                },
         ) {
+            Column(Modifier.fillMaxSize()) {
+            // Barrita: arriba abre todo, abajo vuelve; tocarla alterna.
+            Box(
+                Modifier.fillMaxWidth().height(24.dp).clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                ) { sheet.toggle() }.semantics { contentDescription = if (sheet.expanded) "Mostrar el mapa" else "Ver todo" },
+                contentAlignment = Alignment.Center,
+            ) { Box(Modifier.size(40.dp, 5.dp).clip(CircleShape).background(BuddyColor.Border)) }
             AnimatedContent(
                 targetState = selectedSpot,
                 transitionSpec = {
@@ -469,9 +607,22 @@ fun TripMapScreen(
                         presenceText = presenceText,
                         fotos = fotos,
                         isLoadingFotos = isLoadingFotos,
-                        buddies = buddies,
-                        isLoadingBuddies = isLoadingBuddies,
                         canRecommend = canRecommend,
+                        products = products,
+                        isLoadingProducts = isLoadingProducts,
+                        expanded = sheet.expanded,
+                        onOpenProductPhoto = { productoAmpliado = it },
+                        onAsk = { p, pr ->
+                            val card = if (p == null) com.buddy.app.features.businesschat.BizCard(
+                                kind = "place", title = spot.name, subtitle = spot.categoryName, spotId = spot.id.lowercase())
+                            else com.buddy.app.features.businesschat.BizCard(
+                                kind = "product", title = p.name, subtitle = pr?.label?.takeIf { it.isNotEmpty() },
+                                price = pr?.price?.let { String.format(java.util.Locale.US, "S/ %.2f", it) },
+                                imageUrl = p.coverFor(pr), productId = p.id)
+                            chatTarget = com.buddy.app.features.businesschat.BusinessChatTarget(
+                                title = spot.name, spotId = spot.id.lowercase(), card = card)
+                        },
+                        gridState = panelGrid,
                         onAddPhoto = {
                             // AQUÍ nace el journey, no al elegir el lugar: hasta
                             // este toque el usuario solo estaba mirando la ficha.
@@ -482,29 +633,15 @@ fun TripMapScreen(
                                 if (journey != null) onOpenBook(journey, -1, true)
                             }
                         },
-                        onOpenBuddy = { perfilDe = it },
                         onNavigate = { navigationTarget = spot },
-                        onShare = {
-                            compartiendo = com.buddy.app.core.data.model.ChatCard.Place(
-                                spotId = spot.id,
-                                destinationId = destId,
-                                name = spot.name,
-                                category = spot.categoryName,
-                                // La foto que se está viendo: es la que verá el
-                                // destinatario en el chat.
-                                photoUrl = fotos.firstOrNull()?.url ?: spot.coverUrl,
-                                lat = spot.lat,
-                                lng = spot.lng,
-                                authorName = fotos.firstOrNull()?.autor,
-                            )
-                        },
                         onOpenPhoto = { fotoAmpliada = it },
-                        onClose = { selectedSpotId = null },
                     )
                 } else {
                     RailDeLugares(
                         spots = spots,
                         presenceText = presenceText,
+                        expanded = sheet.expanded,
+                        gridState = placesGrid,
                         onSelect = { elegido ->
                             selectedSpotId = elegido.id
                             mapRef?.controller?.animateTo(
@@ -514,6 +651,12 @@ fun TripMapScreen(
                     )
                 }
             }
+            }
+        }
+
+        chatTarget?.let { t ->
+            com.buddy.app.features.businesschat.BusinessChatScreen(t, onClose = { chatTarget = null },
+                vm = androidx.hilt.navigation.compose.hiltViewModel(key = "biz-${t.spotId}-${t.card?.productId}"))
         }
 
         // ── Perfil de un buddy ──────────────────────────────────────────────
@@ -556,7 +699,10 @@ fun TripMapScreen(
 
 /** Alto fijo del panel — el mismo con rail o con ficha, para que elegir un
  *  lugar no reacomode el mapa bajo el dedo. */
-private val PanelHeight = 258.dp
+private val PanelHeight = 300.dp
+
+/** Cerrada, la lista mide lo justo para su título y dos tarjetas. */
+private val ListPanelHeight = 300.dp
 
 /**
  * ZOOM: LA CIUDAD Y LA CUADRA
@@ -575,15 +721,22 @@ private const val ZoomDestino = 13.5
 private const val ZoomLugar = 18.5
 private const val DuracionZoomMs = 600L
 
+/**
+ * "Lugares en esta zona" (iOS, 23 Nov 2026): cerrada, solo DOS tarjetas fijas
+ * que llenan el ancho (sin fila que se mueva de lado); abierta, todos los
+ * lugares en una cuadrícula de 2 con la misma tarjeta.
+ */
 @Composable
 private fun RailDeLugares(
     spots: List<ApiGuideSpot>,
     presenceText: String?,
+    expanded: Boolean,
+    gridState: androidx.compose.foundation.lazy.grid.LazyGridState,
     onSelect: (ApiGuideSpot) -> Unit,
 ) {
-    Column(Modifier.fillMaxSize().padding(top = 14.dp)) {
-        // La presencia primero: las personas son el corazón de Buddy, antes que
-        // los lugares.
+    val screenW = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
+    val cardW = (screenW - 40.dp - 10.dp) / 2
+    Column(Modifier.fillMaxSize()) {
         if (presenceText != null) {
             Row(
                 Modifier.padding(horizontal = 20.dp),
@@ -591,38 +744,39 @@ private fun RailDeLugares(
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
                 Box(Modifier.size(7.dp).clip(CircleShape).background(BuddyColor.Accent))
-                Text(
-                    presenceText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                    color = BuddyColor.Ink, maxLines = 1,
-                )
+                Text(presenceText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = BuddyColor.Ink, maxLines = 1)
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(6.dp))
         }
-
         if (spots.isEmpty()) {
-            Column(
-                Modifier.padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
+            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text("Sin explorar aún", style = BuddyType.Callout, fontWeight = FontWeight.SemiBold, color = BuddyColor.Ink)
-                Text(
-                    "Nadie ha agregado recomendaciones aquí todavía. La guía de este lugar la construye su comunidad.",
-                    style = BuddyType.Caption1, color = BuddyColor.InkMuted,
-                )
+                Text("Nadie ha agregado recomendaciones aquí todavía. La guía de este lugar la construye su comunidad.",
+                     style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+            }
+            return@Column
+        }
+        Column(Modifier.padding(start = 20.dp, end = 20.dp, bottom = 10.dp)) {
+            Text("Lugares en esta zona", style = BuddyType.Title3, color = BuddyColor.Ink)
+            Text("Toca uno para ver fotos e información", style = BuddyType.Footnote, color = BuddyColor.InkMuted)
+        }
+        if (expanded) {
+            androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
+                state = gridState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 120.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                items(spots.size, key = { spots[it].id }) { i ->
+                    PlacePhotoCard(spot = spots[i], index = i, isSelected = false, onClick = { onSelect(spots[i]) }, width = cardW)
+                }
             }
         } else {
-            Text(
-                "Recomendado por buddies",
-                style = BuddyType.Title3, color = BuddyColor.Ink,
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp),
-            )
-            LazyRow(
-                Modifier.fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 20.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                itemsIndexed(spots, key = { _, s -> s.id }) { i, spot ->
-                    PlacePhotoCard(spot = spot, index = i, isSelected = false) { onSelect(spot) }
+            Row(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                spots.take(2).forEachIndexed { i, spot ->
+                    PlacePhotoCard(spot = spot, index = i, isSelected = false, onClick = { onSelect(spot) }, width = cardW)
                 }
             }
         }

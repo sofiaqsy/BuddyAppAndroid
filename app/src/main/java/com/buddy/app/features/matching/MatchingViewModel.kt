@@ -40,6 +40,25 @@ class MatchingViewModel @Inject constructor(
     private var pollJob: Job? = null
 
     /**
+     * true cuando el usuario cerró (back) ANTES de que createHelpRequest
+     * terminara. Sin esto, tocar un tema y volver enseguida dejaba una
+     * solicitud huérfana viva para siempre: cancelSearch() no tenía nada que
+     * cancelar porque en ese momento _state todavía era Idle (la creación
+     * seguía en vuelo) — la solicitud llegaba a existir DESPUÉS del cierre y
+     * nadie la cancelaba. Con esto, apenas la creación responde se cancela de
+     * inmediato en vez de asentarse como "searching".
+     */
+    private var cancelPendingRequest = false
+
+    /** Llamado al cerrar la conversación con un tema ya elegido pero sin
+     *  confirmación todavía (ni Searching ni pioneerConfirmation). */
+    fun cancelPendingIfInFlight() {
+        if (_state.value is SearchState.Searching) { cancelSearch(); return }
+        Log.d(TAG, "cerrar con solicitud en vuelo — se cancelará apenas llegue")
+        cancelPendingRequest = true
+    }
+
+    /**
      * @param ensureJourney true (default) = contexto "Mi viaje": asegurar el
      * trip ANTES de pedir ayuda, igual que siempre — así el journey aparece en
      * "Tu trip" y el backend lo promueve a active. false = contexto "Ubicación
@@ -49,6 +68,7 @@ class MatchingViewModel @Inject constructor(
      */
     fun findBuddy(destinationId: String, category: String, description: String? = null, ensureJourney: Boolean = true) {
         if (_state.value is SearchState.Searching) return
+        cancelPendingRequest = false
         viewModelScope.launch {
             try {
                 val journeyId = if (ensureJourney) {
@@ -86,6 +106,7 @@ class MatchingViewModel @Inject constructor(
         cityName: String?,
         onDone: () -> Unit,
     ) {
+        cancelPendingRequest = false
         viewModelScope.launch {
             _isPioneerRegistering.value = true
             try {
@@ -95,7 +116,7 @@ class MatchingViewModel @Inject constructor(
                 // no "crea un trip". Antes esto llamaba ensureActiveTrip(...) y
                 // dejaba un trip fantasma en el tab Trips por cada pregunta
                 // pioneer, cosa que nadie pidió.
-                try {
+                val created = try {
                     repo.createHelpRequest(
                         destinationId = destinationId,
                         category = category,
@@ -112,6 +133,12 @@ class MatchingViewModel @Inject constructor(
                         category = category,
                         lat = lat, lng = lng,
                     )
+                }
+                if (cancelPendingRequest) {
+                    cancelPendingRequest = false
+                    Log.d(TAG, "pioneer completó tras un cierre — cancelando de inmediato ${created.id.take(8)}")
+                    runCatching { repo.cancelRequest(created.id) }
+                    return@launch
                 }
                 val city = cityName ?: "tu zona"
                 _pioneerConfirmation.value =
@@ -146,6 +173,12 @@ class MatchingViewModel @Inject constructor(
                 try {
                     val request = repo.createHelpRequest(destinationId, category, description, journeyId,
                         lat = punto?.lat, lng = punto?.lng)
+                    if (cancelPendingRequest) {
+                        cancelPendingRequest = false
+                        Log.d(TAG, "createHelpRequest completó tras un cierre — cancelando de inmediato ${request.id.take(8)}")
+                        runCatching { repo.cancelRequest(request.id) }
+                        return@launch
+                    }
                     _state.value = SearchState.Searching(request.id, category)
                     startSse(request.id)
                     startRecoveryPoll(request.id)
