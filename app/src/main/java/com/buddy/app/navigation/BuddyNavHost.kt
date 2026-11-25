@@ -95,6 +95,12 @@ fun BuddyRoot() {
     val conexionesVm: com.buddy.app.features.conexiones.ConexionesViewModel =
         androidx.hilt.navigation.compose.hiltViewModel()
     val conexionesState by conexionesVm.state.collectAsState()
+    // Preguntas a negocios sin responder: se suman al círculo rojo de Conexiones
+    // y se recargan al volver a la app, como iOS (Keyla, 25 Nov 2026).
+    val bizInboxVm: com.buddy.app.features.businesschat.VisitorInboxViewModel = androidx.hilt.navigation.compose.hiltViewModel()
+    val bizPending by com.buddy.app.features.businesschat.BizPending.count.collectAsState()
+    val activeFarmForBadge by com.buddy.app.features.business.BusinessStore.activeFarmId.collectAsState()
+    androidx.lifecycle.compose.LifecycleResumeEffect(activeFarmForBadge) { bizInboxVm.load(activeFarmForBadge); onPauseOrDispose { } }
     // Misma instancia (scope de Activity) que usa InicioScreen — al cerrar el
     // chat hay que refrescar trip+match o la card del buddy queda huérfana.
     val homeVm: com.buddy.app.features.home.HomeViewModel =
@@ -194,7 +200,7 @@ fun BuddyRoot() {
             if (!imeOpen) BuddyTabBar(
                 yoLabel = if (activeBusiness != null) "Negocio" else null,
                 selected = selectedTab,
-                unreadChats = conexionesState.totalUnread,
+                unreadChats = conexionesState.totalUnread + bizPending,
                 onSelect = { selectedTab = it },
                 onReselect = { tab ->
                     if (tab == AppTab.Trips) tripsScrollToTop++
@@ -273,7 +279,9 @@ fun BuddyRoot() {
                 scrollToTopToken = tripsScrollToTop,
             )
             // Sin trips en Conexiones (Keyla, 23 Nov 2026): el botón lleva a Inicio.
-            AppTab.Conexiones -> ConexionesScreen(modifier, onOpenTrips = { selectedTab = AppTab.Inicio })
+            AppTab.Conexiones -> ConexionesScreen(modifier, onOpenTrips = { selectedTab = AppTab.Inicio },
+                businessFarmId = activeBusiness?.farmId, businessName = activeBusiness?.name,
+                onOpenTraveler = { id, name -> perfilAbierto = Triple(id, name, null) })
             AppTab.Yo -> if (activeBusiness != null) com.buddy.app.features.business.BusinessHomeScreen(
                 activeBusiness,
                 modifier,
@@ -335,6 +343,20 @@ fun BuddyRoot() {
     //
     // Se come los toques: si no, tocar una zona vacía del perfil llegaría a lo
     // que hay detrás.
+    // Conversación con un negocio abierta desde su notificación.
+    val bizChatId by com.buddy.app.features.businesschat.BizChatLinks.pending.collectAsState()
+    bizChatId?.let { id ->
+        val inbox by bizInboxVm.state.collectAsState()
+        val conv = inbox.items.firstOrNull { it.id == id }
+        val title = if (activeFarmForBadge != null) conv?.travelerName ?: "Visitante" else conv?.businessName ?: "Negocio"
+        Box(Modifier.fillMaxSize().background(BuddyColor.Canvas).pointerInput(Unit) {}) {
+            com.buddy.app.features.businesschat.BusinessChatScreen(
+                target = com.buddy.app.features.businesschat.BusinessChatTarget(title = title, conversationId = id),
+                onClose = { com.buddy.app.features.businesschat.BizChatLinks.pending.value = null; bizInboxVm.load(activeFarmForBadge) },
+                onOpenTraveler = { tid, name -> perfilAbierto = Triple(tid, name, null) },
+            )
+        }
+    }
     // "Mis trips" a pantalla completa, encima de la app (abre desde Yo).
     if (misTripsOpen) {
         Box(Modifier.fillMaxSize().background(BuddyColor.Canvas).pointerInput(Unit) {}) {

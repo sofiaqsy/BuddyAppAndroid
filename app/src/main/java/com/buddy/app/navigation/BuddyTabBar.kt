@@ -65,7 +65,7 @@ fun BuddyTabBar(
                         .padding(horizontal = 2.dp, vertical = 4.dp),
                 ) {
                     BadgedBox(badge = {
-                        if (badge > 0) Badge(containerColor = BuddyColor.ErrorRed) { Text("$badge") }
+                        if (badge > 0) com.buddy.app.core.designsystem.components.UnreadBadge(badge)
                     }) {
                         Icon(
                             imageVector = if (active) tab.activeIcon else tab.icon,

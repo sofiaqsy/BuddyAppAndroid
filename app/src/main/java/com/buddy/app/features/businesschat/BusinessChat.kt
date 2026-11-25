@@ -92,7 +92,11 @@ data class BizCard(
 )
 
 @Serializable data class BizMessage(val id: String, val senderRole: String, val body: String, val card: BizCard? = null, val createdAt: String? = null)
-@Serializable data class BizThread(val side: String = "traveler", val messages: List<BizMessage> = emptyList(), val blocked: Boolean? = null, val blockedByMe: Boolean? = null)
+@Serializable data class BizThread(val side: String = "traveler", val messages: List<BizMessage> = emptyList(), val blocked: Boolean? = null, val blockedByMe: Boolean? = null,
+                                   val conversation: BizConv? = null)
+/** Para abrir el perfil del visitante desde el chat del negocio. */
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+@Serializable data class BizConv(@kotlinx.serialization.json.JsonNames("traveler_id", "travelerId") val travelerId: String? = null)
 @Serializable data class BizConversationRef(val id: String, val businessName: String? = null)
 @Serializable data class BizConversation(
     val id: String, val farmId: String? = null, val spotId: String? = null, val businessName: String? = null,
@@ -146,6 +150,7 @@ class BusinessChatViewModel @Inject constructor(private val api: HomeApi) : View
         val blockedByMe: Boolean = false,
         val error: String? = null,
         val notice: String? = null,
+        val travelerId: String? = null,
     )
 
     private val _state = MutableStateFlow(UiState())
@@ -182,7 +187,7 @@ class BusinessChatViewModel @Inject constructor(private val api: HomeApi) : View
         val id = _state.value.conversationId ?: return
         val t = runCatching { api.bizMessages(id) }.getOrNull() ?: return
         _state.update {
-            it.copy(side = t.side, blocked = t.blocked ?: false, blockedByMe = t.blockedByMe ?: false,
+            it.copy(side = t.side, travelerId = t.conversation?.travelerId ?: it.travelerId, blocked = t.blocked ?: false, blockedByMe = t.blockedByMe ?: false,
                     messages = if (t.messages != it.messages) t.messages else it.messages)
         }
     }
@@ -228,7 +233,9 @@ class BusinessChatViewModel @Inject constructor(private val api: HomeApi) : View
 // ── Pantalla del chat (iOS BusinessChatView): a pantalla completa ───────────
 
 @Composable
-fun BusinessChatScreen(target: BusinessChatTarget, onClose: () -> Unit, vm: BusinessChatViewModel = hiltViewModel()) {
+fun BusinessChatScreen(target: BusinessChatTarget, onClose: () -> Unit, vm: BusinessChatViewModel = hiltViewModel(),
+                       /** Lado negocio: tocar el nombre abre el perfil del visitante (iOS, 25 Nov 2026). */
+                       onOpenTraveler: ((id: String, name: String) -> Unit)? = null) {
     LaunchedEffect(target) { vm.open(target) }
     BackHandler(onBack = onClose)
     val s by vm.state.collectAsStateWithLifecycle()
@@ -246,8 +253,12 @@ fun BusinessChatScreen(target: BusinessChatTarget, onClose: () -> Unit, vm: Busi
                 .semantics { contentDescription = "Volver" }, contentAlignment = Alignment.Center) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = BuddyColor.Ink)
             }
+            val travelerId = s.travelerId.takeIf { s.side == "business" }
             Text(target.title, style = BuddyType.Headline, color = BuddyColor.Ink, maxLines = 1,
-                 modifier = Modifier.weight(1f).padding(horizontal = 4.dp))
+                 modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
+                     .then(if (travelerId != null && onOpenTraveler != null)
+                         Modifier.clickable { onOpenTraveler(travelerId, target.title) }.semantics { contentDescription = "Ver perfil de ${target.title}" }
+                     else Modifier))
             Box {
                 Box(Modifier.size(48.dp).clip(CircleShape)
                     .clickable(enabled = s.conversationId != null) { menu = true }
@@ -341,11 +352,31 @@ private fun Bubble(m: BizMessage, mine: Boolean) {
 /** La tarjeta del lugar o del producto por el que se pregunta. */
 @Composable
 fun CardView(c: BizCard) {
+    // Toda la tarjeta abre la foto a pantalla completa con nombre y precio,
+    // el mismo visor de los productos (Keyla, 25 Nov 2026).
+    var viewer by remember { mutableStateOf(false) }
+    val key = "bizcard|${c.imageUrl}"
+    if (viewer && c.imageUrl != null) {
+        val pages = com.buddy.app.core.designsystem.components.ViewerPages.make(listOf(listOf(c.imageUrl)))
+        com.buddy.app.core.designsystem.components.PhotoViewerDialog(
+            pages = pages, startPage = 0, onDismiss = { viewer = false },
+            headerFor = {
+                com.buddy.app.core.designsystem.components.ViewerHeader(
+                    title = c.title,
+                    subtitle = listOfNotNull(c.price, c.subtitle).filter { it.isNotEmpty() }.joinToString(" · ").ifEmpty { null },
+                    plain = true,
+                )
+            },
+            sourceKey = { key },
+        )
+    }
     Row(Modifier.widthIn(max = 280.dp).clip(RoundedCornerShape(14.dp)).background(BuddyColor.Surface)
-            .border(1.dp, BuddyColor.Hairline, RoundedCornerShape(14.dp)).padding(10.dp),
+            .border(1.dp, BuddyColor.Hairline, RoundedCornerShape(14.dp))
+            .clickable(enabled = c.imageUrl != null) { viewer = true }.padding(10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)).background(BuddyColor.PaleSage), contentAlignment = Alignment.Center) {
-            if (c.imageUrl != null) AsyncImage(c.imageUrl, null, contentScale = ContentScale.Crop, modifier = Modifier.size(48.dp))
+            if (c.imageUrl != null) AsyncImage(c.imageUrl, null, contentScale = ContentScale.Crop,
+                modifier = Modifier.size(48.dp).then(com.buddy.app.core.designsystem.components.photoSourceModifier(key)))
             else Icon(if (c.kind == "product") Icons.Outlined.ShoppingBag else Icons.Outlined.Storefront, null, tint = BuddyColor.Brand)
         }
         Column(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -383,25 +414,43 @@ class VisitorInboxViewModel @Inject constructor(private val api: HomeApi) : View
     data class UiState(val loading: Boolean = true, val items: List<BizConversation> = emptyList(), val error: String? = null)
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
-    fun load() = viewModelScope.launch {
-        runCatching { api.bizConversations().conversations }
-            .onSuccess { list -> _state.update { UiState(loading = false, items = list) } }
+    fun load(farmId: String? = null) = viewModelScope.launch {
+        runCatching { api.bizConversations(farmId).conversations }
+            .onSuccess { list -> _state.update { UiState(loading = false, items = list) }; BizPending.update(list, asBusiness = farmId != null) }
             .onFailure { _state.update { it.copy(loading = false, error = "No pudimos cargar tus conversaciones.") } }
     }
+}
+
+/** Conversaciones con negocios que esperan respuesta del visitante: el negocio
+ *  escribió último. Pinta el círculo rojo de Conexiones, como iOS (Keyla, 25 Nov 2026). */
+object BizPending {
+    private val _count = MutableStateFlow(0)
+    val count: StateFlow<Int> = _count.asStateFlow()
+    /** En modo negocio espera respuesta lo que escribió el visitante; si no, lo del negocio. */
+    fun isPending(c: BizConversation, asBusiness: Boolean) = c.lastSender == (if (asBusiness) "traveler" else "business")
+    fun update(items: List<BizConversation>, asBusiness: Boolean) { _count.value = items.count { isPending(it, asBusiness) } }
+}
+
+/** Conversación abierta desde una notificación (Keyla, 25 Nov 2026). */
+object BizChatLinks {
+    val pending = MutableStateFlow<String?>(null)
 }
 
 /** Lista de conversaciones del visitante; vacía, muestra [empty]. */
 @Composable
 fun VisitorInbox(onOpen: (BusinessChatTarget) -> Unit, empty: @Composable () -> Unit, reloadKey: Any? = null,
+                 /** Negocio activo: las preguntas de los visitantes a ese negocio (iOS BusinessInboxView). */
+                 farmId: String? = null,
                  vm: VisitorInboxViewModel = hiltViewModel()) {
-    LaunchedEffect(reloadKey) { vm.load() }
+    val asBusiness = farmId != null
+    LaunchedEffect(reloadKey, farmId) { vm.load(farmId) }
     val s by vm.state.collectAsStateWithLifecycle()
     when {
         s.loading -> Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator(color = BuddyColor.Brand, strokeWidth = 2.5.dp) }
         s.items.isEmpty() -> empty()
         else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 40.dp)) {
             items(s.items, key = { it.id }) { c ->
-                val name = c.businessName ?: "Negocio"
+                val name = if (asBusiness) c.travelerName ?: "Visitante" else c.businessName ?: "Negocio"
                 Row(Modifier.fillMaxWidth().clickable { onOpen(BusinessChatTarget(title = name, conversationId = c.id)) }
                         .background(BuddyColor.Surface).padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -410,9 +459,10 @@ fun VisitorInbox(onOpen: (BusinessChatTarget) -> Unit, empty: @Composable () -> 
                     }
                     Column(Modifier.weight(1f)) {
                         Text(name, style = BuddyType.Headline, color = BuddyColor.Ink, maxLines = 1)
-                        Text((if (c.lastSender == "traveler") "Tú: " else "") + (c.lastMessage ?: ""),
+                        Text((if (c.lastSender == (if (asBusiness) "business" else "traveler")) "Tú: " else "") + (c.lastMessage ?: ""),
                              style = BuddyType.Footnote, color = BuddyColor.InkMuted, maxLines = 2)
                     }
+                    if (BizPending.isPending(c, asBusiness)) com.buddy.app.core.designsystem.components.UnreadBadge(1)
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = BuddyColor.Brand)
                 }
                 HorizontalDivider(color = BuddyColor.Hairline)

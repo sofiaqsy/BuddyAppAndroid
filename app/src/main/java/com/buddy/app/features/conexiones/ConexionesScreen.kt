@@ -1,5 +1,6 @@
 package com.buddy.app.features.conexiones
 
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -78,6 +79,10 @@ import java.time.temporal.ChronoUnit
 fun ConexionesScreen(
     modifier: Modifier = Modifier,
     onOpenTrips: () -> Unit = {},
+    /** Negocio activo (farmId): Conexiones muestra las preguntas de los visitantes. */
+    businessFarmId: String? = null,
+    businessName: String? = null,
+    onOpenTraveler: (id: String, name: String) -> Unit = { _, _ -> },
     viewModel: ConexionesViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -113,6 +118,7 @@ fun ConexionesScreen(
             com.buddy.app.features.businesschat.BusinessChatTarget(title = bizChatTitle, conversationId = id),
             onClose = { bizChat = null; inboxReload++ },
             vm = hiltViewModel(key = "biz-$id"),
+            onOpenTraveler = onOpenTraveler,
         )
         return
     }
@@ -124,7 +130,7 @@ fun ConexionesScreen(
                verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text("Tus conexiones", style = BuddyType.DisplayXL, color = BuddyColor.Brand,
                  modifier = Modifier.semantics { heading() })
-            Text("Tus conversaciones con los negocios", style = BuddyType.Footnote, color = BuddyColor.InkMuted)
+            Text(if (businessFarmId != null) "Las preguntas de los visitantes a tu negocio" else "Tus conversaciones con los negocios", style = BuddyType.Footnote, color = BuddyColor.InkMuted)
         }
 
         // ── Estado anónimo: invitación a crear perfil, no un tab vacío ─────
@@ -138,6 +144,13 @@ fun ConexionesScreen(
                 isLoading = isSigningIn,
                 error = signInError,
                 onGoogle = { ctx -> sessionVm.signInWithGoogle(ctx) },
+            )
+            // Modo negocio: las preguntas de los visitantes a ese negocio (iOS, 25 Nov 2026).
+            businessFarmId != null -> com.buddy.app.features.businesschat.VisitorInbox(
+                onOpen = { t -> bizChatTitle = t.title; bizChat = t.conversationId },
+                empty = { BusinessInboxEmpty(businessName ?: "tu negocio") },
+                reloadKey = inboxReload,
+                farmId = businessFarmId,
             )
             // Villa Rica V1 sin buddies: el visitante ve sus conversaciones con
             // negocios (Keyla, 23 Nov 2026), igual que iOS.
@@ -753,5 +766,21 @@ private fun EmptyConnectionsState(onCreateTrip: () -> Unit) {
         ) {
             Text("Explorar lugares", style = BuddyType.FootnoteBold, color = BuddyColor.InkInverse)
         }
+    }
+}
+
+/** Negocio sin preguntas todavía (iOS BusinessInboxView). */
+@Composable
+private fun BusinessInboxEmpty(businessName: String) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 32.dp), horizontalAlignment = Alignment.CenterHorizontally,
+           verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically)) {
+        Box(Modifier.size(56.dp).clip(androidx.compose.foundation.shape.CircleShape).background(BuddyColor.PaleSage),
+            contentAlignment = Alignment.Center) {
+            androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Outlined.ChatBubbleOutline, null, tint = BuddyColor.Brand)
+        }
+        Text("Aún no hay preguntas", style = BuddyType.Title3, color = BuddyColor.Ink,
+             textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        Text("Cuando un visitante pregunte por $businessName o uno de tus productos, aparecerá aquí.",
+             style = BuddyType.Footnote, color = BuddyColor.InkMuted, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }

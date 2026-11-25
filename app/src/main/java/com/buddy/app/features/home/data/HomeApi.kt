@@ -28,7 +28,7 @@ interface HomeApi {
     suspend fun bizStart(@Body body: com.buddy.app.features.businesschat.BizStartBody): com.buddy.app.features.businesschat.BizConversationRef
 
     @GET("integrations/business-chat/conversations")
-    suspend fun bizConversations(): com.buddy.app.features.businesschat.BizConversationsResponse
+    suspend fun bizConversations(@retrofit2.http.Query("farmId") farmId: String? = null): com.buddy.app.features.businesschat.BizConversationsResponse
 
     @GET("integrations/business-chat/{id}/messages")
     suspend fun bizMessages(@Path("id") id: String): com.buddy.app.features.businesschat.BizThread

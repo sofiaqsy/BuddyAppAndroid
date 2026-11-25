@@ -36,10 +36,10 @@ class BuddyFirebaseMessagingService : FirebaseMessagingService() {
         Log.d(TAG, "Notification: title=$title, body=$body, type=$type")
 
         // Show notification
-        showNotification(title, body, matchId, type)
+        showNotification(title, body, matchId, type, message.data["conversation_id"], message.data["farm_id"])
     }
 
-    private fun showNotification(title: String, body: String, matchId: String?, type: String?) {
+    private fun showNotification(title: String, body: String, matchId: String?, type: String?, conversationId: String? = null, farmId: String? = null) {
         val notificationId = Random.nextInt(1000)
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
@@ -57,6 +57,8 @@ class BuddyFirebaseMessagingService : FirebaseMessagingService() {
             if (!type.isNullOrEmpty()) {
                 putExtra("notif_type", type)
             }
+            conversationId?.let { putExtra("conversation_id", it) }
+            farmId?.let { putExtra("farm_id", it) }
         }
         Log.d(TAG, "showNotification: intent extras notif_type=${intent.getStringExtra("notif_type")} match_id=${intent.getStringExtra("match_id")}")
         val pendingIntent = android.app.PendingIntent.getActivity(

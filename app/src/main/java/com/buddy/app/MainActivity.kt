@@ -107,6 +107,23 @@ class MainActivity : ComponentActivity() {
 
     /** Tap en una notificación push → deja el tab destino para que BuddyRoot lo aplique. */
     private fun handleNotificationIntent(intent: Intent?) {
+        // Pregunta o respuesta de un negocio: abrir directo esa conversación. En
+        // segundo plano el sistema pasa los datos tal cual ("type"); en primer
+        // plano los pone el servicio ("notif_type").
+        val bizType = intent?.getStringExtra("notif_type") ?: intent?.getStringExtra("type")
+        val conversationId = intent?.getStringExtra("conversation_id")
+        if ((bizType == "business_answer" || bizType == "business_question") && conversationId != null) {
+            // Pregunta a uno de mis negocios: activarlo para responder como él (iOS).
+            val farmId = intent?.getStringExtra("farm_id")
+            if (bizType == "business_question" && farmId != null) {
+                com.buddy.app.features.business.BusinessStore.load(this)
+                if (com.buddy.app.features.business.BusinessStore.businesses.value.any { it.farmId == farmId })
+                    com.buddy.app.features.business.BusinessStore.activate(this, farmId)
+            }
+            com.buddy.app.features.businesschat.BizChatLinks.pending.value = conversationId
+            PendingTabNavigation.request(AppTab.Conexiones)
+            return
+        }
         val type = intent?.getStringExtra("notif_type")
         Log.d(TAG, "handleNotificationIntent: notif_type=$type")
         when (type) {
