@@ -1,5 +1,6 @@
 package com.buddy.app.navigation
 
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material3.Scaffold
@@ -187,7 +188,10 @@ fun BuddyRoot() {
     Scaffold(
         containerColor = BuddyColor.Canvas,
         bottomBar = {
-            BuddyTabBar(
+            // Con el teclado abierto la barra se esconde (iOS, Keyla 24 Nov 2026).
+            @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+            val imeOpen = androidx.compose.foundation.layout.WindowInsets.isImeVisible
+            if (!imeOpen) BuddyTabBar(
                 yoLabel = if (activeBusiness != null) "Negocio" else null,
                 selected = selectedTab,
                 unreadChats = conexionesState.totalUnread,

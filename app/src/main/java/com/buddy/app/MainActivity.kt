@@ -7,6 +7,11 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.activity.enableEdgeToEdge
@@ -49,7 +54,34 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             BuddyTheme {
-                androidx.compose.foundation.layout.Box {
+                // Tocar fuera de un campo de texto cierra el teclado, en toda la app
+                // (Keyla, 24 Nov 2026). Se mira el toque al final: si un botón, una
+                // lista o un campo ya lo usaron, no se hace nada.
+                val focus = androidx.compose.ui.platform.LocalFocusManager.current
+                val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+                androidx.compose.foundation.layout.Box(
+                    androidx.compose.ui.Modifier.pointerInput(Unit) {
+                        // Toque libre o deslizar hacia abajo (Keyla, 24 Nov 2026) cierran el teclado.
+                        val swipe = 48.dp.toPx()
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Final)
+                            var moved = false
+                            while (true) {
+                                val ev = awaitPointerEvent(PointerEventPass.Final)
+                                val ch = ev.changes.firstOrNull { it.id == down.id } ?: break
+                                val dx = ch.position.x - down.position.x
+                                val dy = ch.position.y - down.position.y
+                                if (kotlin.math.abs(dx) > 10f || kotlin.math.abs(dy) > 10f) moved = true
+                                if (dy > swipe && dy > kotlin.math.abs(dx)) { focus.clearFocus(); keyboard?.hide(); break }
+                                if (!ch.pressed) {
+                                    // Toque sin mover que nadie usó (no fue un botón ni un campo).
+                                    if (!moved && !ch.isConsumed) { focus.clearFocus(); keyboard?.hide() }
+                                    break
+                                }
+                            }
+                        }
+                    }
+                ) {
                     BuddyRoot()
                     // El visor de fotos, encima de todo y en la misma ventana.
                     com.buddy.app.core.designsystem.components.PhotoOverlayHost()
