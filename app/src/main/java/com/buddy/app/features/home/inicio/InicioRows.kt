@@ -1,5 +1,6 @@
 package com.buddy.app.features.home.inicio
 
+import androidx.compose.ui.focus.focusRequester
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
@@ -254,10 +255,16 @@ private fun Hero(topInset: Dp, title: String, slogan: String?, coverUrl: String?
 
 @Composable
 private fun SearchField(query: String, onQuery: (String) -> Unit, onSubmit: () -> Unit, modifier: Modifier) {
+    // Un toque en cualquier parte de la barra abre el teclado (Keyla, 25 Nov 2026).
+    val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     Row(
         modifier.fillMaxWidth().height(52.dp)
             .shadow(12.dp, CircleShape, ambientColor = Color.Black.copy(alpha = 0.10f), spotColor = Color.Black.copy(alpha = 0.10f))
             .background(BuddyColor.Surface, CircleShape)
+            .clip(CircleShape)
+            .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                       indication = null) { focus.requestFocus(); keyboard?.show() }
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -271,7 +278,7 @@ private fun SearchField(query: String, onQuery: (String) -> Unit, onSubmit: () -
                 cursorBrush = SolidColor(BuddyColor.Brand),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search, autoCorrectEnabled = false),
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { onSubmit() }),
-                modifier = Modifier.fillMaxWidth().testTag("searchField")
+                modifier = Modifier.fillMaxWidth().focusRequester(focus).testTag("searchField")
                     .semantics { contentDescription = "¿Qué quieres descubrir?" },
             )
         }
