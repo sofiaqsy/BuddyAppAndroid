@@ -120,6 +120,9 @@ fun InicioRows(
     locationPrompt: (@Composable () -> Unit)? = null,
     /** Sube cada vez que se toca Inicio estando en Inicio (iOS tabReselected). */
     reselectToken: Int = 0,
+    /** Ubicación del usuario: distancia de los lugares turísticos (vienen de la guía, sin distancia). */
+    userLat: Double? = null,
+    userLng: Double? = null,
     viewModel: InicioRowsViewModel = hiltViewModel(),
 ) {
     val ui by viewModel.state.collectAsStateWithLifecycle()
@@ -188,23 +191,27 @@ fun InicioRows(
                     item(key = "empty") { EmptyState() }
                 } else {
                     // Sin "Explora por categoría" ni filas por categoría (Keyla, 23 Nov 2026).
-                    if (nearby.isNotEmpty()) item(key = "nearby") {
-                        PlaceRow("Cerca de ti", "Lugares a pocos minutos", nearby, large = true,
-                                 onSeeAll = { openCategory = InicioRowsLogic.NEARBY_ROUTE }, capsuleAction = true,
-                                 onOpenPlace = onOpenPlace)
+                    // Orden (Keyla, 24 Nov 2026): Lugares turísticos primero y en grande;
+                    // Cerca de ti baja al lugar de los turísticos, con tarjetas altas.
+                    if (ui.touristPlaces.isNotEmpty()) item(key = "tourist") {
+                        PlaceRow("Lugares turísticos", "Cataratas, miradores y naturaleza",
+                                 InicioRowsLogic.rotated(withDistance(ui.touristPlaces, userLat, userLng), ui.reshuffleToken), large = true,
+                                 onSeeAll = null, onOpenPlace = onOpenPlace)
                     }
                     if (ui.localProducts.isNotEmpty()) item(key = "products") {
                         ProductsRow(ui.localProducts, ui.reshuffleToken) { onOpenPlace(it.card) }
                     }
-                    // Lugares turísticos sin dueño, después de los productos (Keyla, 24 Nov 2026).
-                    if (ui.touristPlaces.isNotEmpty()) item(key = "tourist") {
-                        PlaceRow("Lugares turísticos", "Cataratas, miradores y naturaleza",
-                                 InicioRowsLogic.rotated(ui.touristPlaces, ui.reshuffleToken), large = false,
-                                 onSeeAll = null, onOpenPlace = onOpenPlace, tall = true)
+                    if (nearby.isNotEmpty()) item(key = "nearby") {
+                        PlaceRow("Cerca de ti", "Lugares a pocos minutos", nearby, large = false,
+                                 onSeeAll = { openCategory = InicioRowsLogic.NEARBY_ROUTE }, capsuleAction = true,
+                                 onOpenPlace = onOpenPlace, tall = true, showsDistance = true)
                     }
-                    item(key = "more") {
+                    // Sin repetir lo que ya está en Cerca de ti (Keyla, 24 Nov 2026).
+                    val nearbyIds = nearby.map { it.id }.toSet()
+                    val more = InicioRowsLogic.rotated(local.filter { it.id !in nearbyIds }, ui.reshuffleToken)
+                    if (more.isNotEmpty()) item(key = "more") {
                         PlaceRow("Más para descubrir", "Una selección de lugares de Villa Rica",
-                                 InicioRowsLogic.rotated(local, ui.reshuffleToken), large = false,
+                                 more, large = false,
                                  onSeeAll = null, onOpenPlace = onOpenPlace, tall = true)
                     }
                 }
@@ -336,7 +343,8 @@ private fun ProductsRow(tiles: List<InicioRowsViewModel.LocalProductTile>, token
 @Composable
 private fun PlaceRow(title: String, subtitle: String?, items: List<ApiPlaceCard>, large: Boolean,
                      onSeeAll: (() -> Unit)?, onOpenPlace: (ApiPlaceCard) -> Unit,
-                     icon: ImageVector? = null, capsuleAction: Boolean = false, tall: Boolean = false) {
+                     icon: ImageVector? = null, capsuleAction: Boolean = false, tall: Boolean = false,
+                     showsDistance: Boolean = false) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         RowHeader(title, subtitle, icon, onSeeAll, capsuleAction)
         LazyRow(contentPadding = PaddingValues(horizontal = Edge),
@@ -345,7 +353,7 @@ private fun PlaceRow(title: String, subtitle: String?, items: List<ApiPlaceCard>
             items(items, key = { it.id }) { card ->
                 // En filas de categoría no se repite la categoría en cada tarjeta.
                 Box(Modifier.pressable { onOpenPlace(card) }) {
-                    PlaceCard(card, large = large, showsCategory = icon == null, tall = tall)
+                    PlaceCard(card, large = large, showsCategory = icon == null, tall = tall, showsDistance = showsDistance)
                 }
             }
         }
@@ -419,7 +427,9 @@ private fun EmptyState() {
 @Composable
 fun PlaceCard(card: ApiPlaceCard, large: Boolean, showsCategory: Boolean = true, fillWidth: Boolean = false,
               /** Foto vertical 4:5 con categoría ("Más para descubrir", 23 Nov 2026). */
-              tall: Boolean = false) {
+              tall: Boolean = false,
+              /** Distancia también en tarjetas altas: "Cerca de ti" (Keyla, 24 Nov 2026). */
+              showsDistance: Boolean = false) {
     val portrait = tall || (!showsCategory && !large)
     val width = if (large) 264.dp else if (portrait) 150.dp else 168.dp
     val ratio = if (portrait) 4f / 5f else 4f / 3f
@@ -436,7 +446,7 @@ fun PlaceCard(card: ApiPlaceCard, large: Boolean, showsCategory: Boolean = true,
             AsyncImage(model = card.coverUrl, contentDescription = null, contentScale = ContentScale.Crop,
                        modifier = Modifier.fillMaxSize())
             val d = InicioRowsLogic.distanceText(card.distanceMeters)
-            if (large && d != null) {
+            if ((large || showsDistance) && d != null) {
                 Row(Modifier.padding(10.dp).background(BuddyColor.Surface, CircleShape).padding(horizontal = 9.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                     LocationPin(Modifier.width(11.dp).height(14.dp))
@@ -555,6 +565,18 @@ fun InicioRowsSkeleton(modifier: Modifier = Modifier) {
                         .background(BuddyColor.GroupedBg, RoundedCornerShape(CardCorner)))
                 }
             }
+        }
+    }
+}
+
+/** Distancia en línea recta desde el usuario (como iOS), para tarjetas que llegan sin ella. */
+private fun withDistance(cards: List<ApiPlaceCard>, lat: Double?, lng: Double?): List<ApiPlaceCard> {
+    if (lat == null || lng == null) return cards
+    return cards.map { c ->
+        if (c.distanceMeters != null || c.lat == null || c.lng == null) c else {
+            val out = FloatArray(1)
+            android.location.Location.distanceBetween(lat, lng, c.lat, c.lng, out)
+            c.copy(distanceMeters = out[0].toInt())
         }
     }
 }

@@ -38,8 +38,12 @@ object InicioRowsLogic {
         return near.ifEmpty { cards }
     }
 
+    /** "Cerca de ti" = a pocos minutos. */
+    const val NEARBY_RADIUS_METERS = 3_000
+
     fun nearby(local: List<ApiPlaceCard>): List<ApiPlaceCard> =
-        local.filter { it.distanceMeters != null }.sortedBy { it.distanceMeters ?: Int.MAX_VALUE }.take(10)
+        // Solo lo que de verdad está cerca: hasta 3 km (Keyla, 24 Nov 2026).
+        local.filter { (it.distanceMeters ?: Int.MAX_VALUE) <= NEARBY_RADIUS_METERS }.sortedBy { it.distanceMeters ?: Int.MAX_VALUE }.take(10)
 
     fun categoryName(c: ApiPlaceCard): String {
         val cat = c.category?.trim().orEmpty()

@@ -165,6 +165,8 @@ fun InicioScreen(
         destinationId = state.destinationId,
         onOpenPlace = onOpenPlace,
         reselectToken = reselectToken,
+        userLat = state.stableLat ?: state.userLat,
+        userLng = state.stableLng ?: state.userLng,
         modifier = modifier,
         activeBuddyName = null,
         locationPrompt = if (state.effectiveHomeContext == null) {
