@@ -783,6 +783,7 @@ fun TripMapScreen(
                         },
                     ) {
                     PlaceGuideDetail(
+                        onExpandPanel = { if (!sheet.expanded) sheet.expand(true) },
                         spot = spot,
                         presenceText = presenceText,
                         fotos = fotos,

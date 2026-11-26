@@ -2,6 +2,7 @@ package com.buddy.app.features.business
 
 import android.content.Context
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.material.icons.outlined.StarOutline
@@ -27,6 +28,8 @@ import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material.icons.outlined.PersonAdd
 import androidx.compose.material.icons.outlined.Storefront
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -81,6 +84,12 @@ class BusinessHomeViewModel @Inject constructor(
         val covers: Map<String, String> = emptyMap(),
         /** spotId -> destino, para abrir el lugar en su mapa. */
         val destinations: Map<String, String> = emptyMap(),
+        /** Perfil publicado en el servidor (26 Nov 2026). */
+        val about: String = "",
+        val contact: String = "",
+        /** spotId -> horario de esa sede. */
+        val hours: Map<String, List<DayHours>> = emptyMap(),
+        val profileSaveError: String? = null,
     )
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state
@@ -98,6 +107,40 @@ class BusinessHomeViewModel @Inject constructor(
     }
 
     val actionError = MutableStateFlow<String?>(null)
+
+    /** Descripción y WhatsApp: al servidor (la página del lugar muestra la descripción). */
+    fun saveProfile(farmId: String, about: String, contact: String) {
+        BusinessStore.saveProfile(ctx, farmId, about, contact)
+        _state.update { it.copy(about = about, contact = contact, profileSaveError = null) }
+        viewModelScope.launch {
+            runCatching { api.saveFarmProfile(farmId, FarmProfileBody(about.ifBlank { null }, contact.ifBlank { null })) }
+                .onFailure { _state.update { it.copy(profileSaveError = "No pudimos publicar la descripción. Revisa tu conexión.") } }
+        }
+    }
+
+    fun saveHours(farmId: String, spotId: String, hours: List<DayHours>, done: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            runCatching { api.saveSpotHours(spotId, SpotHoursBody(farmId, hours)) }
+                .onSuccess { _state.update { it.copy(hours = it.hours + (spotId to hours), profileSaveError = null) }; done(true) }
+                .onFailure { _state.update { it.copy(profileSaveError = "No pudimos publicar el horario. Revisa tu conexión.") }; done(false) }
+        }
+    }
+
+    /** Lo del servidor gana; lo que solo estaba en este teléfono se sube una vez (iOS). */
+    private suspend fun syncProfile(farmId: String) {
+        val server = runCatching { api.farmProfile(farmId) }.getOrNull()
+        val localAbout = BusinessStore.about(ctx, farmId); val localContact = BusinessStore.contact(ctx, farmId)
+        if (server == null) { _state.update { it.copy(about = localAbout, contact = localContact) }; return }
+        if (server.about != null || server.contact != null) {
+            BusinessStore.saveProfile(ctx, farmId, server.about.orEmpty(), server.contact.orEmpty())
+            _state.update { it.copy(about = server.about.orEmpty(), contact = server.contact.orEmpty()) }
+        } else {
+            _state.update { it.copy(about = localAbout, contact = localContact) }
+            if (localAbout.isNotBlank() || localContact.isNotBlank())
+                runCatching { api.saveFarmProfile(farmId, FarmProfileBody(localAbout.ifBlank { null }, localContact.ifBlank { null })) }
+        }
+        _state.update { it.copy(hours = server.hours.orEmpty()) }
+    }
 
     /** Sede nueva: un lugar de Buddy que es suyo, o uno nuevo propuesto aquí (iOS BusinessLocationPicker). */
     fun addLocation(farmId: String, spotId: String?, name: String, lat: Double, lng: Double, done: () -> Unit) {
@@ -137,6 +180,7 @@ class BusinessHomeViewModel @Inject constructor(
             val main = BusinessStore.mainSpot(ctx, farmId)
             val spots = runCatching { api.farmSpots(farmId).spots.sortedByDescending { it.id == main } }
             OwnerSpots.map.value = spots.getOrDefault(emptyList()).associate { it.id.lowercase() to farmId }
+            syncProfile(farmId)
             val cats = runCatching { api.farmCategories(farmId) }.getOrNull()
             val catalog = runCatching { api.catalog().categories }.getOrDefault(emptyList())
             val covers = spots.getOrDefault(emptyList()).mapNotNull { sp ->
@@ -195,10 +239,21 @@ fun BusinessHomeScreen(
         return
     }
     if (inviting) InviteTeamDialog(business) { inviting = false }
-    // Editor de producto (fase 3): null = cerrado; Pair(true, null) = nuevo.
-    var editing by remember { mutableStateOf<Pair<Boolean, FincasProduct?>?>(null) }
-    editing?.let { (_, prod) ->
-        ProductEditorScreen(farmId, prod, modifier) { changed -> editing = null; if (changed) vm.load(farmId, force = true) }
+    // Editor de producto: null = cerrado. Con focusId = solo esa presentación;
+    // addPresentation = una nueva vacía (iOS, Keyla 26 Nov 2026).
+    // Horario de una sede a pantalla completa (iOS: ficha de la sede, 26 Nov 2026).
+    var editingHours by remember { mutableStateOf<FarmSpot?>(null) }
+    editingHours?.let { sp ->
+        HoursEditorScreen(sp.name, s.hours[sp.id], modifier, onClose = { editingHours = null }) { hours, done ->
+            vm.saveHours(farmId, sp.id, hours) { ok -> done(ok); if (ok) editingHours = null }
+        }
+        return
+    }
+    var editing by remember { mutableStateOf<ProductEdit?>(null) }
+    editing?.let { e ->
+        ProductEditorScreen(farmId, e.product, modifier, focusPresentationId = e.focusId, addPresentation = e.add) { changed ->
+            editing = null; if (changed) vm.load(farmId, force = true)
+        }
         return
     }
 
@@ -249,7 +304,10 @@ fun BusinessHomeScreen(
                         onOpenPlace(com.buddy.app.core.data.model.ApiPlaceCard(
                             id = sp.id, name = sp.name, destinationId = s.destinations[sp.id], lat = sp.lat, lng = sp.lng,
                             coverUrl = s.covers[sp.id]))
-                    }) { main, extra -> vm.saveCats(farmId, main, extra) }
+                    },
+                    onEditHours = { sp -> editingHours = sp },
+                    onSaveProfile = { a, c -> vm.saveProfile(farmId, a, c) },
+                ) { main, extra -> vm.saveCats(farmId, main, extra) }
             }
         } else {
             item {
@@ -257,14 +315,22 @@ fun BusinessHomeScreen(
                     "+ Añadir producto", style = BuddyType.FootnoteBold, color = BuddyColor.InkInverse,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().height(50.dp).clip(CircleShape).background(BuddyColor.Brand)
-                        .clickable { editing = true to null }.wrapContentHeight(),
+                        .clickable { editing = ProductEdit(null) }.wrapContentHeight(),
                 )
             }
             when {
-                s.loading -> item { Text("Cargando productos", style = BuddyType.Footnote, color = BuddyColor.InkMuted) }
+                s.loading -> item {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        androidx.compose.material3.CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = BuddyColor.Brand)
+                        Text("Cargando productos", style = BuddyType.Footnote, color = BuddyColor.InkMuted)
+                    }
+                }
                 s.productsError != null -> item { Text(s.productsError!!, style = BuddyType.Footnote, color = BuddyColor.InkMuted) }
                 s.products.isEmpty() -> item { Text("Aún no hay productos.", style = BuddyType.Footnote, color = BuddyColor.InkMuted) }
-                else -> items(s.products, key = { it.id }) { p -> ProductRow(p) { editing = true to p } }
+                else -> items(s.products, key = { it.id }) { p -> ProductRow(p,
+                    onEdit = { editing = ProductEdit(p) },
+                    onEditPresentation = { id -> editing = ProductEdit(p, focusId = id) },
+                    onAddPresentation = { editing = ProductEdit(p, add = true) }) }
             }
         }
     }
@@ -278,15 +344,15 @@ private fun BusinessMenu(isOwner: Boolean, onInvite: () -> Unit, onSwitchToPerso
             Icon(Icons.Filled.MoreHoriz, contentDescription = "Opciones de cuenta", tint = BuddyColor.InkMuted)
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            if (isOwner) DropdownMenuItem(
-                text = { Text("Invitar a mi equipo", style = BuddyType.Body, color = BuddyColor.Ink) },
-                leadingIcon = { Icon(Icons.Outlined.PersonAdd, null, tint = BuddyColor.Ink) },
-                onClick = { open = false; onInvite() },
-            )
             DropdownMenuItem(
                 text = { Text("Cambiar a mi cuenta personal", style = BuddyType.Body, color = BuddyColor.Ink) },
                 leadingIcon = { Icon(Icons.Outlined.SwapHoriz, null, tint = BuddyColor.Ink) },
                 onClick = { open = false; onSwitchToPersonal() },
+            )
+            if (isOwner) DropdownMenuItem(
+                text = { Text("Invitar a mi equipo", style = BuddyType.Body, color = BuddyColor.Ink) },
+                leadingIcon = { Icon(Icons.Outlined.PersonAdd, null, tint = BuddyColor.Ink) },
+                onClick = { open = false; onInvite() },
             )
             DropdownMenuItem(
                 text = { Text("Cerrar sesión del negocio", style = BuddyType.Body, color = BuddyColor.Ink) },
@@ -314,22 +380,73 @@ private fun Card(title: String, icon: androidx.compose.ui.graphics.vector.ImageV
     }
 }
 
+private data class ProductEdit(val product: FincasProduct?, val focusId: String? = null, val add: Boolean = false)
+
+/** Igual que iOS remoteCard (Keyla, 26 Nov 2026): nombre, descripción, estado a la
+ *  derecha; cada presentación con su foto, precio en píldora (oculta: solo borde
+ *  tenue) y "+ Agregar presentación". */
 @Composable
-private fun ProductRow(p: FincasProduct, onEdit: () -> Unit) {
-    Row(
+private fun ProductRow(p: FincasProduct, onEdit: () -> Unit, onEditPresentation: (String) -> Unit, onAddPresentation: () -> Unit) {
+    val active = p.status == "active"
+    val statusText = when (p.status) { "active" -> "En la tienda"; "archived" -> "Oculto"; else -> "Borrador" }
+    val pres = p.presentations.orEmpty()
+    Column(
         Modifier.fillMaxWidth().shadow(3.dp, RoundedCornerShape(16.dp)).clip(RoundedCornerShape(16.dp))
-            .background(BuddyColor.Surface).clickable(onClick = onEdit).padding(12.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+            .background(BuddyColor.Surface).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        AsyncImage(model = p.coverUrl, contentDescription = null, contentScale = ContentScale.Crop,
-            modifier = Modifier.size(64.dp).clip(RoundedCornerShape(12.dp)).background(BuddyColor.SurfaceRaised))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Column(Modifier.fillMaxWidth().clickable(onClick = onEdit), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(p.name, style = BuddyType.Headline, color = BuddyColor.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            p.presentations.orEmpty().forEach { pr ->
-                val price = pr.price?.let { soles(it) } ?: ""
-                Text(listOf(pr.label, price).filter { it.isNotEmpty() }.joinToString(" · ") + if (pr.visible == false) " · oculto" else "",
-                    fontSize = 14.sp, fontWeight = FontWeight.Medium, color = BuddyColor.InkMuted)
+            p.description?.trim()?.takeIf { it.isNotEmpty() }?.let {
+                Text(it, style = BuddyType.Footnote, color = BuddyColor.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+            Row(
+                Modifier.align(Alignment.End).clip(CircleShape)
+                    .background(if (active) BuddyColor.SageTint else BuddyColor.SurfaceRaised)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(if (active) Icons.Outlined.Storefront else Icons.Outlined.VisibilityOff, null,
+                    tint = if (active) BuddyColor.Brand else BuddyColor.InkMuted, modifier = Modifier.size(13.dp))
+                Text(statusText, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                    color = if (active) BuddyColor.Brand else BuddyColor.InkMuted)
+            }
+        }
+        pres.forEachIndexed { i, pr ->
+            val oculta = pr.visible == false
+            Column {
+                Row(
+                    Modifier.fillMaxWidth().clickable { onEditPresentation(pr.id) }.padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    AsyncImage(model = pr.ownPhoto ?: p.coverUrl, contentDescription = null, contentScale = ContentScale.Crop,
+                        alpha = if (oculta) 0.5f else 1f,
+                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)).background(BuddyColor.PaleSage))
+                    if (oculta) Icon(Icons.Outlined.VisibilityOff, null, tint = BuddyColor.InkMuted, modifier = Modifier.size(16.dp))
+                    Text((pr.label.ifEmpty { "Presentación" }) + if (oculta) " · oculta" else "",
+                        style = BuddyType.Footnote, color = if (oculta) BuddyColor.InkMuted else BuddyColor.Ink,
+                        modifier = Modifier.weight(1f))
+                    pr.price?.let { price ->
+                        Text(soles(price), style = BuddyType.FootnoteBold,
+                            color = if (oculta) BuddyColor.InkMuted.copy(alpha = 0.6f) else BuddyColor.Brand,
+                            modifier = Modifier.clip(CircleShape)
+                                .then(if (oculta) Modifier.border(1.dp, BuddyColor.InkMuted.copy(alpha = 0.2f), CircleShape)
+                                      else Modifier.background(BuddyColor.SageTint))
+                                .padding(horizontal = 10.dp, vertical = 5.dp))
+                    }
+                }
+                if (i < pres.size - 1) Box(Modifier.padding(start = 60.dp, top = 6.dp).fillMaxWidth().height(0.5.dp)
+                    .background(BuddyColor.InkMuted.copy(alpha = 0.15f)))
+            }
+        }
+        Row(
+            Modifier.padding(top = 4.dp).fillMaxWidth().height(40.dp).clip(CircleShape).background(BuddyColor.SageTint)
+                .clickable(onClick = onAddPresentation),
+            horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Add, null, tint = BuddyColor.Brand, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Agregar presentación", style = BuddyType.FootnoteBold, color = BuddyColor.Brand)
         }
     }
 }
@@ -382,12 +499,15 @@ private fun InviteTeamDialog(business: FincasAuth.Business, onClose: () -> Unit)
 @Composable
 private fun MiNegocio(farmId: String, businessName: String, s: BusinessHomeViewModel.State, isLinked: Boolean,
                       onShowProducts: () -> Unit, onOpenSpot: (FarmSpot) -> Unit,
-                      onAddLocation: () -> Unit, onSetMain: (FarmSpot) -> Unit, onRemove: (FarmSpot) -> Unit, onSaveCategories: (String, List<String>) -> Unit) {
-    val ctx = LocalContext.current
-    var savedAbout by remember(farmId) { mutableStateOf(BusinessStore.about(ctx, farmId)) }
-    var savedContact by remember(farmId) { mutableStateOf(BusinessStore.contact(ctx, farmId)) }
-    var about by remember(farmId) { mutableStateOf(savedAbout) }
-    var contact by remember(farmId) { mutableStateOf(savedContact) }
+                      onAddLocation: () -> Unit, onSetMain: (FarmSpot) -> Unit, onRemove: (FarmSpot) -> Unit,
+                      onEditHours: (FarmSpot) -> Unit, onSaveProfile: (String, String) -> Unit,
+                      onSaveCategories: (String, List<String>) -> Unit) {
+    // Lo publicado en el servidor (el ViewModel ya subió lo que solo estaba en el teléfono).
+    val savedAbout = s.about
+    val savedContact = s.contact
+    var about by remember(farmId, savedAbout) { mutableStateOf(savedAbout) }
+    var contact by remember(farmId, savedContact) { mutableStateOf(savedContact) }
+    var hoursOpen by remember { mutableStateOf(true) }
     var main by remember(s.categories) { mutableStateOf(s.categories?.main) }
     var extra by remember(s.categories) { mutableStateOf(s.categories?.secondary.orEmpty()) }
     var locationsOpen by remember { mutableStateOf(true) }
@@ -400,14 +520,15 @@ private fun MiNegocio(farmId: String, businessName: String, s: BusinessHomeViewM
         add(Step("Agrega tu WhatsApp", savedContact.isNotBlank(), "general"))
         if (isLinked) add(Step("Añade tus productos", s.products.isNotEmpty(), "products"))
         add(Step("Agrega una ubicación", s.spots.isNotEmpty(), "locations"))
-        add(Step("Agrega el horario de tus ubicaciones", false, "locations"))
+        add(Step("Agrega el horario de tus ubicaciones", s.spots.isNotEmpty() && s.spots.all { s.hours[it.id] != null }, "hours"))
         add(Step("Sube fotos de tus ubicaciones", s.covers.isNotEmpty(), "locations"))
     }
     val done = steps.count { it.done }
     val next = steps.firstOrNull { !it.done }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Completo: desaparece; mientras carga, espera para no mostrar un paso falso (iOS).
+        if (next != null && !s.loading && !s.profileLoading) Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Completa tu perfil", style = BuddyType.Title3, color = BuddyColor.Brand, modifier = Modifier.weight(1f))
                 Text("$done de ${steps.size}", style = BuddyType.Caption1.copy(fontWeight = FontWeight.SemiBold), color = BuddyColor.Brand,
@@ -419,7 +540,13 @@ private fun MiNegocio(farmId: String, businessName: String, s: BusinessHomeViewM
                 Row(
                     Modifier.fillMaxWidth().clip(CircleShape).background(BuddyColor.SageTint)
                         .clickable {
-                            when (n.target) { "products" -> onShowProducts(); "general" -> generalOpen = true; else -> locationsOpen = true }
+                            when (n.target) {
+                                "products" -> onShowProducts()
+                                "general" -> generalOpen = true
+                                // Horario: abre la primera sede sin horario (iOS, 26 Nov 2026).
+                                "hours" -> s.spots.firstOrNull { s.hours[it.id] == null }?.let(onEditHours) ?: run { locationsOpen = true }
+                                else -> locationsOpen = true
+                            }
                         }.padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -514,13 +641,38 @@ private fun MiNegocio(farmId: String, businessName: String, s: BusinessHomeViewM
                     about = savedAbout; contact = savedContact; main = s.categories?.main; extra = s.categories?.secondary.orEmpty()
                 }
                 Pill("Guardar cambios", dark = true, modifier = Modifier.weight(1f)) {
-                    BusinessStore.saveProfile(ctx, farmId, about.trim(), contact.trim())
-                    savedAbout = about.trim(); savedContact = contact.trim()
+                    onSaveProfile(about.trim(), contact.trim())
                     if (main != null && (main != s.categories?.main || extra != s.categories?.secondary.orEmpty())) onSaveCategories(main!!, extra)
                 }
             }
         }
-        Text("Por ahora la descripción y el contacto se guardan en este teléfono. Pronto se publicarán en tu página de Buddy.",
+        // Horario después de Información general (iOS, 26 Nov 2026): cada fila abre el de esa sede.
+        Group("Horario de atención", Icons.Outlined.Schedule,
+            summary = when {
+                s.spots.isEmpty() -> "Sin ubicaciones"
+                s.spots.any { s.hours[it.id] == null } -> "Falta el horario"
+                s.spots.size == 1 -> HoursSummary.text(s.hours[s.spots[0].id]!!)
+                else -> "Listo en ${s.spots.size} ubicaciones"
+            },
+            open = hoursOpen, onToggle = { hoursOpen = !hoursOpen }) {
+            if (s.spots.isEmpty()) Text("Agrega una ubicación para poner su horario.", style = BuddyType.Footnote, color = BuddyColor.InkMuted)
+            s.spots.forEachIndexed { i, sp ->
+                if (i > 0) HorizontalDivider(color = BuddyColor.Hairline)
+                val h = s.hours[sp.id]
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { onEditHours(sp) },
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        if (s.spots.size > 1) Text(sp.name, style = BuddyType.FootnoteBold, color = BuddyColor.Ink)
+                        Text(h?.let { HoursSummary.text(it) } ?: "Sin horario", style = BuddyType.Footnote,
+                            color = if (h == null) BuddyColor.Brand else BuddyColor.InkMuted)
+                    }
+                    Text(if (h == null) "Agregar" else "Editar", style = BuddyType.FootnoteBold, color = BuddyColor.Brand)
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = BuddyColor.InkMuted, modifier = Modifier.size(18.dp))
+                }
+            }
+        }
+        s.profileSaveError?.let { Text(it, style = BuddyType.Footnote, color = BuddyColor.ErrorRed) }
+        Text("La descripción y el horario se ven en la página de tu lugar. Tu WhatsApp no se muestra.",
             style = BuddyType.Caption1, color = BuddyColor.InkMuted)
     }
 }

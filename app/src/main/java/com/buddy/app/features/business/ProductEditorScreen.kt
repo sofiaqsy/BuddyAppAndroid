@@ -70,7 +70,14 @@ private fun num(d: Double?) = d?.let { if (it % 1.0 == 0.0) it.toLong().toString
  * producto", Android fase 3, 24 Nov 2026). Los cambios van directo a Apartalo.
  */
 @Composable
-fun ProductEditorScreen(farmId: String, product: FincasProduct?, modifier: Modifier = Modifier, onClose: (changed: Boolean) -> Unit) {
+fun ProductEditorScreen(
+    farmId: String, product: FincasProduct?, modifier: Modifier = Modifier,
+    /** Desde una presentación de la lista: solo esa, sin nombre ni descripción (iOS, 26 Nov 2026). */
+    focusPresentationId: String? = null,
+    /** Desde "+ Agregar presentación": una nueva vacía, sola. */
+    addPresentation: Boolean = false,
+    onClose: (changed: Boolean) -> Unit,
+) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var name by remember { mutableStateOf(product?.name.orEmpty()) }
@@ -82,8 +89,18 @@ fun ProductEditorScreen(farmId: String, product: FincasProduct?, modifier: Modif
                     p.photos?.firstOrNull { it.url == p.ownPhoto }?.id))
             }
             if (isEmpty()) add(SizeDraft(null, "250", "g", "", "", true, null))
+            if (addPresentation && product != null) add(SizeDraft(null, "", "g", "", "", true, null))
         }
     }
+    // Llave del borrador a mostrar solo (null = producto completo).
+    val focusKey = remember {
+        when {
+            addPresentation && product != null -> sizes.last().key
+            focusPresentationId != null -> sizes.firstOrNull { it.id == focusPresentationId }?.key
+            else -> null
+        }
+    }
+    val shownSizes = if (focusKey != null) sizes.filter { it.key == focusKey } else sizes
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var confirmArchive by remember { mutableStateOf(false) }
@@ -97,7 +114,7 @@ fun ProductEditorScreen(farmId: String, product: FincasProduct?, modifier: Modif
         error = null
         val n = name.trim()
         if (n.isEmpty()) { error = "Escribe el nombre del producto."; return }
-        sizes.forEach { s ->
+        shownSizes.forEach { s ->
             if (s.size.replace(",", ".").toDoubleOrNull()?.let { it > 0 } != true) { error = "Revisa el tamaño de cada presentación."; return }
             if (s.price.replace(",", ".").toDoubleOrNull()?.let { it >= 0 } != true) { error = "Escribe el precio de cada presentación."; return }
         }
@@ -107,7 +124,7 @@ fun ProductEditorScreen(farmId: String, product: FincasProduct?, modifier: Modif
                 val pid = createdId ?: FincasAuth.createProduct(ctx, farmId, n, description.trim(), productKey).also { createdId = it }
                 if (product != null && (n != product.name || description.trim() != product.description.orEmpty()))
                     FincasAuth.updateProduct(ctx, farmId, pid, JSONObject().put("name", n).put("description", description.trim()))
-                sizes.forEach { s ->
+                shownSizes.forEach { s ->
                     val fields = JSONObject()
                         .put("packSize", s.size.replace(",", ".").toDouble())
                         .put("unit", s.unit)
@@ -136,38 +153,54 @@ fun ProductEditorScreen(farmId: String, product: FincasProduct?, modifier: Modif
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = BuddyColor.Brand, modifier = Modifier.size(20.dp)) }
             Spacer(Modifier.width(12.dp))
-            Text(if (product == null) "Nuevo producto" else "Editar producto", style = BuddyType.Title3, color = BuddyColor.Ink)
+            Column {
+                Text(
+                    when {
+                        focusKey != null && addPresentation -> "Nueva presentación"
+                        focusKey != null -> "Editar presentación"
+                        product == null -> "Nuevo producto"
+                        else -> "Editar producto"
+                    },
+                    style = BuddyType.Title3, color = BuddyColor.Ink,
+                )
+                if (focusKey != null) Text(name, style = BuddyType.Footnote, color = BuddyColor.InkMuted)
+            }
         }
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            Field("Nombre", name, { name = it })
-            Field("Descripción (opcional)", description, { description = it.take(500) }, singleLine = false)
-            Text("Tamaños y precios", style = BuddyType.Headline, color = BuddyColor.Ink)
-            sizes.forEachIndexed { i, s ->
-                SizeCard(s, removable = s.id == null && sizes.size > 1, onRemove = { sizes.removeAt(i) },
+            if (focusKey == null) {
+                Field("Nombre", name, { name = it })
+                Field("Descripción (opcional)", description, { description = it.take(500) }, singleLine = false)
+                Text("Tamaños y precios", style = BuddyType.Headline, color = BuddyColor.Ink)
+            }
+            shownSizes.forEach { s ->
+                SizeCard(s, removable = focusKey == null && s.id == null && sizes.size > 1, onRemove = { sizes.remove(s) },
                     onRemovePhoto = {
                         // Foto nueva (aún no subida): se descarta. Foto guardada: se quita en Apartalo.
                         if (s.newPhoto != null) s.newPhoto = null
                         else {
                             val pid = createdId; val presId = s.id; val photoId = s.photoId
                             if (pid != null && presId != null && photoId != null) scope.launch {
+                                // Indicador mientras se quita: con mala señal tarda (Keyla, 26 Nov 2026).
+                                saving = true
                                 runCatching { FincasAuth.deletePresentationPhoto(ctx, farmId, pid, presId, photoId) }
                                     .onSuccess { s.photoUrl = null; s.photoId = null; changedSomething = true }
                                     .onFailure { error = it.message }
+                                saving = false
                             } else error = "Esta foto todavía no se puede quitar desde Buddy."
                         }
                     })
             }
-            Text(
+            if (focusKey == null) Text(
                 "+ Añadir tamaño", style = BuddyType.FootnoteBold, color = BuddyColor.Brand,
                 modifier = Modifier.fillMaxWidth().height(46.dp).clip(CircleShape).background(BuddyColor.SageTint)
                     .clickable { sizes.add(SizeDraft(null, "1", "unidad", "", "", true, null)) }
                     .wrapContentHeight(),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
-            if (product != null) {
+            if (product != null && focusKey == null) {
                 Text(
                     "Quitar producto", style = BuddyType.FootnoteBold, color = BuddyColor.ErrorRed,
                     modifier = Modifier.padding(vertical = 8.dp).clickable { confirmArchive = true },

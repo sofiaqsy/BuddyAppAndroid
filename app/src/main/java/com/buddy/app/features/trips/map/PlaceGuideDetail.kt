@@ -1,5 +1,8 @@
 package com.buddy.app.features.trips.map
 
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material.icons.outlined.Delete
@@ -101,6 +104,8 @@ fun PlaceGuideDetail(
     onFocus: (String?) -> Unit = {},
     /** Desde "Recomendar un lugar": abre en Fotos con "Añadir foto" (Keyla, 25 Nov 2026). */
     startOnPhotos: Boolean = false,
+    /** El panel sube a pantalla completa (al abrir la semana del horario). */
+    onExpandPanel: () -> Unit = {},
 ) {
     var tab by remember(spot.id) { mutableStateOf(if (startOnPhotos) 2 else 0) }
     var userPickedTab by remember(spot.id) { mutableStateOf(startOnPhotos) }
@@ -181,21 +186,25 @@ fun PlaceGuideDetail(
 
         when (tab) {
             0 -> ProductosTab(products, isLoadingProducts, expanded, onOpenProductPhoto, gridState, focus, onAsk)
-            1 -> InfoTabNew(spot, canAsk = products.isNotEmpty()) { onAsk(null, null) }
+            1 -> InfoTabNew(spot, canAsk = products.isNotEmpty(), onExpandPanel = onExpandPanel) { onAsk(null, null) }
             else -> FotosTab(fotos, isLoadingFotos, canRecommend, expanded, onAddPhoto, onOpenPhoto, gridState)
         }
     }
 }
 
 @Composable
-private fun InfoTabNew(spot: ApiGuideSpot, canAsk: Boolean, onAsk: () -> Unit) {
+private fun InfoTabNew(spot: ApiGuideSpot, canAsk: Boolean, onExpandPanel: () -> Unit = {}, onAsk: () -> Unit) {
+    val info = rememberSpotInfo(spot.id)
     Column(
         Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        // Descripción y horario que el negocio publicó en Mi negocio (iOS, 26 Nov 2026).
+        PlacePublicInfo(info, onExpandPanel)
         // Solo lugares con negocio (tienen productos), como iOS.
         if (canAsk) com.buddy.app.features.businesschat.AskBusinessRow(onAsk)
-        if (spot.estaPendiente) {
+        if (info?.about != null || info?.hours != null) Unit
+        else if (spot.estaPendiente) {
             Text("Este lugar está esperando aprobación. Por ahora solo tú lo ves.",
                  style = BuddyType.Footnote, color = BuddyColor.InkMuted)
         } else {
@@ -429,3 +438,59 @@ private fun Foto(foto: FotoDeLugar, onOpenPhoto: (FotoDeLugar) -> Unit) {
 val LocalProductEdit = androidx.compose.runtime.staticCompositionLocalOf<((FincasProduct) -> Unit)?> { null }
 
 val LocalOwnerActions = androidx.compose.runtime.staticCompositionLocalOf<com.buddy.app.features.business.OwnerActions?> { null }
+
+
+/** Caché de la información pública por lugar (Keyla, 26 Nov 2026): lo ya visto
+ *  aparece al instante; se refresca en silencio y solo cambia si el negocio lo editó. */
+private object SpotInfoCache { val map = mutableMapOf<String, com.buddy.app.features.business.SpotInfo>() }
+
+@Composable
+private fun rememberSpotInfo(spotId: String): com.buddy.app.features.business.SpotInfo? {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var info by remember(spotId) { mutableStateOf(SpotInfoCache.map[spotId]) }
+    LaunchedEffect(spotId) {
+        val api = dagger.hilt.android.EntryPointAccessors.fromApplication(ctx.applicationContext,
+            com.buddy.app.features.business.BusinessEntryPoint::class.java).businessApi()
+        runCatching { api.spotInfo(spotId) }.getOrNull()?.let { fresh ->
+            SpotInfoCache.map[spotId] = fresh
+            if (fresh != info) info = fresh
+        }
+    }
+    return info
+}
+
+/** Descripción y horario públicos. Nunca el WhatsApp (el servidor no lo envía). */
+@Composable
+private fun PlacePublicInfo(info: com.buddy.app.features.business.SpotInfo?, onExpandPanel: () -> Unit) {
+    if (info == null) return
+    val hs = com.buddy.app.features.business.HoursSummary
+    info.about?.takeIf { it.isNotBlank() }?.let { Text(it, style = BuddyType.Body, color = BuddyColor.Ink) }
+    val hours = info.hours?.takeIf { it.size == 7 } ?: return
+    var showWeek by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().clickable { showWeek = !showWeek; if (showWeek) onExpandPanel() }.padding(vertical = 4.dp),
+        verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(Modifier.size(30.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(9.dp)).background(BuddyColor.PaleSage),
+            contentAlignment = Alignment.Center) {
+            Icon(Icons.Outlined.Schedule, null, tint = BuddyColor.Brand, modifier = Modifier.size(16.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Text(hs.nowText(hours), style = BuddyType.FootnoteBold, color = if (hs.isOpenNow(hours)) BuddyColor.Brand else BuddyColor.Ink)
+            Text(hs.text(hours), style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+        }
+        Icon(if (showWeek) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+            null, tint = BuddyColor.InkMuted)
+    }
+    if (showWeek) Column(Modifier.padding(start = 40.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val today = hs.today()
+        hours.sortedBy { it.day }.forEach { d ->
+            Row(Modifier.fillMaxWidth()) {
+                Text(com.buddy.app.features.business.DayHours.names[d.day], style = BuddyType.Footnote, color = BuddyColor.Ink,
+                    fontWeight = if (d.day == today) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.weight(1f))
+                Text(if (d.open) "${hs.time(d.from)} – ${hs.time(d.to)}" else "Cerrado", style = BuddyType.Footnote,
+                    color = if (d.open) BuddyColor.Ink else BuddyColor.InkMuted)
+            }
+        }
+    }
+}

@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material.icons.automirrored.filled.Logout
@@ -261,8 +262,8 @@ fun YoScreen(
 
             // Mis trips: el registro y el trip en curso viven aquí (iOS, Keyla
             // 19 Nov 2026), no en la pestaña Comunidad.
-            Spacer(Modifier.height(Spacing.lg))
-            MyTripsEntryCard(onOpenTrips, Modifier.padding(horizontal = Spacing.edge))
+            // La tarjeta "Mis trips" pasó a ser la primera celda de "Trips
+            // publicados" (Nuevo trip / Editar trip), como iOS (Keyla, 26 Nov 2026).
             Spacer(Modifier.height(Spacing.xl))
             // Sin "Perfil de Buddy" ni invitaciones a ser buddy en Yo (iOS,
             // Keyla 20 Nov 2026: no es necesario).
@@ -287,7 +288,13 @@ fun YoScreen(
             }
             Spacer(Modifier.height(Spacing.xl))
             TripsSection(
-                state, onOpenTrips,
+                state,
+                currentTrip = tripsState.selectedTrip,
+                onAddTrip = {
+                    // Sin trip en curso: directo al registro, como iOS.
+                    if (tripsState.selectedTrip == null) tripsViewModel.openRegister()
+                    onOpenTrips()
+                },
                 onDeleteRequest = { deletePublicationTarget = it },
                 onOpenStory = { viewerJourney = it },
             )
@@ -794,65 +801,104 @@ private fun LugaresQueRecomiendasSection(
 @Composable
 private fun TripsSection(
     state: YoViewModel.State,
-    onOpenTrips: () -> Unit,
+    currentTrip: ApiJourney?,
+    onAddTrip: () -> Unit,
     onDeleteRequest: (ApiJourney) -> Unit = {},
     onOpenStory: (ApiJourney) -> Unit = {},
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
         SectionHeader("TRIPS PUBLICADOS", state.journeys.size)
-        if (state.journeys.isEmpty()) {
-            Column(
-                Modifier
-                    .padding(horizontal = Spacing.edge)
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(Radius.md))
-                    .background(BuddyColor.Surface)
-                    .clickable(onClick = onOpenTrips)
-                    .padding(vertical = Spacing.xl),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(Spacing.sm),
-            ) {
-                Box(Modifier.size(48.dp).background(BuddyColor.PaleSage, CircleShape), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.Add, contentDescription = null, Modifier.size(22.dp), tint = BuddyColor.Brand)
-                }
-                Text("Tu primer trip te espera", style = BuddyType.FootnoteBold, color = BuddyColor.Ink)
-            }
-        } else {
-            val remainder = state.journeys.size % 3
-            val ghosts = if (remainder == 0) 0 else 3 - remainder
-            Column(Modifier.padding(horizontal = Spacing.edge), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                (state.journeys.map { TripCell.Journey(it) } + List(ghosts) { TripCell.Ghost })
-                    .chunked(3)
-                    .forEach { rowCells ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                            rowCells.forEach { cell ->
-                                when (cell) {
-                                    is TripCell.Journey -> OwnedTripCell(
-                                        journey = cell.journey,
-                                        onTap = { onOpenStory(cell.journey) },
-                                        onDeleteRequest = { onDeleteRequest(cell.journey) },
-                                        modifier = Modifier.weight(1f)
-                                            .then(com.buddy.app.core.designsystem.components.photoSourceModifier(cell.journey.id)),
-                                    )
-                                    TripCell.Ghost -> Box(
-                                        Modifier
-                                            .weight(1f)
-                                            .aspectRatio(4f / 5f)
-                                            .clip(RoundedCornerShape(Radius.sm))
-                                            .background(BuddyColor.Surface)
-                                            .clickable(onClick = onOpenTrips),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Icon(
-                                            Icons.Filled.Add, contentDescription = null,
-                                            Modifier.size(22.dp), tint = BuddyColor.InkMuted.copy(alpha = 0.6f),
-                                        )
-                                    }
-                                }
+        // Primera celda: "Nuevo trip" (punteada) o "Editar trip" con la vista
+        // previa del trip en curso, como "Añadir lugar" (iOS, Keyla 25 Nov 2026).
+        val cells = listOf<TripCell>(TripCell.Add) + state.journeys.map { TripCell.Journey(it) }
+        val remainder = cells.size % 3
+        val ghosts = if (remainder == 0) 0 else 3 - remainder
+        Column(Modifier.padding(horizontal = Spacing.edge), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            (cells + List(ghosts) { TripCell.Ghost })
+                .chunked(3)
+                .forEach { rowCells ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        rowCells.forEach { cell ->
+                            when (cell) {
+                                TripCell.Add -> AddTripCell(currentTrip, onAddTrip, Modifier.weight(1f))
+                                is TripCell.Journey -> OwnedTripCell(
+                                    journey = cell.journey,
+                                    onTap = { onOpenStory(cell.journey) },
+                                    onDeleteRequest = { onDeleteRequest(cell.journey) },
+                                    modifier = Modifier.weight(1f)
+                                        .then(com.buddy.app.core.designsystem.components.photoSourceModifier(cell.journey.id)),
+                                )
+                                TripCell.Ghost -> Spacer(Modifier.weight(1f).aspectRatio(4f / 5f))
                             }
                         }
                     }
+                }
+        }
+    }
+}
+
+@Composable
+private fun AddTripCell(currentTrip: ApiJourney?, onTap: () -> Unit, modifier: Modifier = Modifier) {
+    if (currentTrip != null) {
+        // Vista previa del trip en curso como iOS (Keyla, 26 Nov 2026): la primera
+        // página guardada en el teléfono (el trip aún no está publicado), si no la
+        // portada; "Privado" con candado arriba y "Editar trip" abajo.
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        var localThumb by remember(currentTrip.id) { mutableStateOf<java.io.File?>(null) }
+        androidx.compose.runtime.LaunchedEffect(currentTrip.id, com.buddy.app.features.trips.memoir.MemoirEvents.saveTick) {
+            localThumb = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val per = com.buddy.app.features.trips.memoir.MemoirPersistence(ctx.applicationContext)
+                per.load(currentTrip.id).firstNotNullOfOrNull { pg ->
+                    pg.thumbnailFileName?.let { per.thumbnailFile(it, currentTrip.id) }?.takeIf { it.exists() }
+                }
             }
+        }
+        val model: Any? = localThumb ?: currentTrip.pageThumbs?.firstOrNull() ?: currentTrip.coverUrl ?: currentTrip.destination?.coverUrl
+        Box(modifier.aspectRatio(4f / 5f).clip(RoundedCornerShape(Radius.sm)).background(BuddyColor.GroupedBg).clickable(onClick = onTap)) {
+            if (model != null) AsyncImage(model = model, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            if (currentTrip.isPublic == false) Row(
+                Modifier.align(Alignment.TopStart).padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(50))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Icon(Icons.Filled.Lock, null, tint = Color.White, modifier = Modifier.size(11.dp))
+                Text("Privado", style = BuddyType.Caption2.copy(fontWeight = FontWeight.SemiBold), color = Color.White)
+            }
+            Text(
+                "Editar trip",
+                style = BuddyType.FootnoteBold, color = Color.White,
+                modifier = Modifier.align(Alignment.BottomStart).padding(8.dp)
+                    .clip(RoundedCornerShape(50)).background(BuddyColor.Brand)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            )
+        }
+    } else {
+        Column(
+            modifier
+                .aspectRatio(4f / 5f)
+                .drawBehind {
+                    drawRoundRect(
+                        color = BuddyColor.Sage,
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(
+                            width = 1.5.dp.toPx(),
+                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                                floatArrayOf(6.dp.toPx(), 4.dp.toPx()), 0f,
+                            ),
+                        ),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(Radius.sm.toPx()),
+                    )
+                }
+                .clip(RoundedCornerShape(Radius.sm))
+                .clickable(onClick = onTap),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Box(Modifier.size(44.dp).background(BuddyColor.SageTint, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Add, null, Modifier.size(22.dp), tint = BuddyColor.Brand)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text("Nuevo trip", style = BuddyType.FootnoteBold, color = BuddyColor.Brand)
         }
     }
 }
@@ -860,6 +906,7 @@ private fun TripsSection(
 private sealed interface TripCell {
     data class Journey(val journey: ApiJourney) : TripCell
     data object Ghost : TripCell
+    data object Add : TripCell
 }
 
 /**
