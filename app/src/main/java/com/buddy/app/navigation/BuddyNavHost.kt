@@ -74,6 +74,8 @@ fun BuddyRoot() {
     /** El lugar que venía elegido al abrir el mapa, si se llegó tocando UNO
      *  concreto. Nulo cuando lo que se abrió es el destino entero. */
     var mapSpotId by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
+    /** La tarjeta del lugar tocado, por si no está en el mapa (sin local físico). */
+    var mapSpotCard by androidx.compose.runtime.remember { mutableStateOf<com.buddy.app.features.trips.map.ApiGuideSpot?>(null) }
     var mapRecommend by androidx.compose.runtime.remember { mutableStateOf(false) }
     /** Perfil de otra persona, como capa encima de la app.
      *
@@ -137,6 +139,7 @@ fun BuddyRoot() {
             recommendMode = mapRecommend,
             journey = journey,
             initialSpotId = mapSpotId,
+            initialSpot = mapSpotCard?.takeIf { it.id == mapSpotId },
             canRecommend = conexionesState.isApprovedBuddy || mapRecommend,
             onOpenBook = { j, page, isStandaloneShare ->
                 mapJourney = null; mapSpotId = null
@@ -251,6 +254,9 @@ fun BuddyRoot() {
                         // entero. Se distinguen por el id: la ciudad viaja como
                         // tarjeta sintética cuyo id ES el del destino.
                         mapSpotId = card.id.takeIf { it != destId }
+                        mapSpotCard = com.buddy.app.features.trips.map.ApiGuideSpot(
+                            id = card.id, name = card.name, lat = card.lat ?: 0.0, lng = card.lng ?: 0.0,
+                            coverUrl = card.coverUrl, destinationId = destId)
                         mapJourney = com.buddy.app.core.data.model.ApiJourney(
                             id = card.id,
                             title = card.destinationName ?: card.name,

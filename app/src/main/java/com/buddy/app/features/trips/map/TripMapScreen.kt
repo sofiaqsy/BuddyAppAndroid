@@ -173,6 +173,10 @@ fun TripMapScreen(
      *  Home), no el destino. Se aplica UNA vez — si luego se cierra la ficha,
      *  el mapa se queda en la lista, que es lo que el gesto de cerrar pidió. */
     initialSpotId: String? = null,
+    /** El lugar tal como venía en la tarjeta tocada. Si no está en el mapa (un
+     *  negocio sin local físico, solo entrega), la ficha se abre igual con estos
+     *  datos y sin pin (Keyla, 26 Nov 2026: "Kit religioso" abría el mapa vacío). */
+    initialSpot: ApiGuideSpot? = null,
     /** Buddy aprobado: puede documentar lugares. Lo sabe quien contiene la
      *  pantalla —ya lo consulta para el CTA de Tu trip— y no se vuelve a pedir. */
     canRecommend: Boolean = false,
@@ -206,10 +210,16 @@ fun TripMapScreen(
     // cuelgan de UN destino, así que el mapa de Breña salía vacío aunque
     // Cafetería Rosal y El encanto están ahí (pertenecen a "Lima").
     var spotsEnPantalla by remember { mutableStateOf(emptyList<ApiGuideSpot>()) }
-    val spots = remember(spotsDestino, spotsEnPantalla) {
+    // Lugar que no está en el mapa: entra a la lista recién si no aparece al cargar.
+    var fueraDelMapa by remember { mutableStateOf<ApiGuideSpot?>(null) }
+    val spots = remember(spotsDestino, spotsEnPantalla, fueraDelMapa) {
         val ids = spotsDestino.mapTo(HashSet()) { it.id }
-        spotsDestino + spotsEnPantalla.filter { it.id !in ids }
+        val todos = spotsDestino + spotsEnPantalla.filter { it.id !in ids }
+        val extra = fueraDelMapa
+        if (extra != null && todos.none { it.id == extra.id }) todos + extra else todos
     }
+    // Desde el primer instante: si el lugar sí está en el mapa, el del mapa lo reemplaza.
+    LaunchedEffect(initialSpot?.id) { fueraDelMapa = initialSpot }
     val buddyCount by produceState<Int?>(null, destId) {
         value = if (destId != null) withContext(Dispatchers.IO) { viewModel.buddyCount(destId) } else null
     }
@@ -546,7 +556,9 @@ fun TripMapScreen(
                             },
                         ),
                     )
-                    val markerSpots = spots.ifEmpty {
+                    // Sin pin para el lugar que no está en el mapa (sin local físico).
+                    val enMapa = (spotsDestino + spotsEnPantalla).mapTo(HashSet()) { it.id }
+                    val markerSpots = spots.filter { it.id != fueraDelMapa?.id || it.id in enMapa }.ifEmpty {
                         if (destLat != null && destLng != null) {
                             listOf(ApiGuideSpot(id = "dest", name = destName, lat = destLat, lng = destLng))
                         } else emptyList()
