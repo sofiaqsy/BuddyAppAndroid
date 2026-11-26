@@ -323,7 +323,7 @@ fun BusinessHomeScreen(
                         // Estado en Inicio (iOS, 26 Nov 2026): rojo sin ubicación, ámbar en revisión, verde visible.
                         if (!s.profileLoading) {
                             val (label, tint) = when {
-                                s.spots.isEmpty() -> "No visible en Inicio" to BuddyColor.ErrorRed
+                                s.spots.isEmpty() || s.categories?.main == null -> "No visible en Inicio" to BuddyColor.ErrorRed
                                 s.spots.all { it.id in s.pending } -> "En revisión" to BuddyColor.WarningAmber
                                 else -> "Visible en Inicio" to BuddyColor.Brand
                             }
@@ -574,6 +574,8 @@ private fun MiNegocio(farmId: String, businessName: String, s: BusinessHomeViewM
     val steps = buildList {
         // La ubicación primero: sin ella el negocio no aparece en Inicio (iOS, 26 Nov 2026).
         add(Step("Agrega tu ubicación", s.spots.isNotEmpty(), "locations"))
+        // Sin categoría el negocio no sale en Inicio (iOS, 26 Nov 2026).
+        add(Step("Elige tu categoría", s.spots.isEmpty() || s.categories?.main != null, "general"))
         add(Step("Agrega una descripción", savedAbout.isNotBlank(), "general"))
         add(Step("Agrega tu WhatsApp", savedContact.isNotBlank(), "general"))
         if (isLinked) add(Step("Añade tus productos", s.products.isNotEmpty(), "products"))
@@ -595,7 +597,8 @@ private fun MiNegocio(farmId: String, businessName: String, s: BusinessHomeViewM
                 trackColor = BuddyColor.Hairline, modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape))
             next?.let { n ->
                 // Sin ubicación: "Siguiente" es la alerta obligatoria, en rojo (iOS, 26 Nov 2026).
-                val required = s.spots.isEmpty() && n.target == "locations"
+                val missingCategory = n.label == "Elige tu categoría"
+                val required = (s.spots.isEmpty() && n.target == "locations") || missingCategory
                 val tint = if (required) BuddyColor.ErrorRed else BuddyColor.Brand
                 Row(
                     Modifier.fillMaxWidth().clip(if (required) RoundedCornerShape(16.dp) else CircleShape)
@@ -618,7 +621,8 @@ private fun MiNegocio(farmId: String, businessName: String, s: BusinessHomeViewM
                                 color = if (required) tint else BuddyColor.InkMuted)
                             Text(n.label, style = BuddyType.FootnoteBold, color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        if (required) Text("Sin ubicación, tu negocio no aparece en Inicio.", style = BuddyType.Footnote, color = tint)
+                        if (required) Text(if (missingCategory) "Sin categoría, tu negocio no aparece en Inicio." else "Sin ubicación, tu negocio no aparece en Inicio.",
+                            style = BuddyType.Footnote, color = tint)
                     }
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = tint, modifier = Modifier.size(18.dp))
                 }
@@ -695,14 +699,8 @@ private fun MiNegocio(farmId: String, businessName: String, s: BusinessHomeViewM
             SubTitle("Categoría", Icons.Outlined.Category)
             if (s.profileLoading) Text("Cargando…", style = BuddyType.Footnote, color = BuddyColor.InkMuted)
             else {
-                Combo("Principal", main, s.catalog, allowNone = false) { c -> main = c; extra = extra - listOfNotNull(c) }
-                for (i in 0..1) if (i == 0 || extra.isNotEmpty()) {
-                    Combo("Otra (opcional)", extra.getOrNull(i), s.catalog.filter { it.id != main }, allowNone = true) { c ->
-                        val list = extra.toMutableList()
-                        if (c != null) { if (i < list.size) list[i] = c else list.add(c) } else if (i < list.size) list.removeAt(i)
-                        extra = list.distinct().filter { it != main }
-                    }
-                }
+                // Una sola categoría (iOS, Keyla 26 Nov 2026): elegir la principal borra las extra.
+                Combo("Principal", main, s.catalog, allowNone = false) { c -> main = c; extra = emptyList() }
             }
             HorizontalDivider(color = BuddyColor.Hairline)
             SubTitle("Descripción", Icons.Outlined.Notes)
@@ -710,8 +708,14 @@ private fun MiNegocio(farmId: String, businessName: String, s: BusinessHomeViewM
                 placeholder = { Text("Cuenta qué ofreces, qué te hace especial y qué puede vivir el visitante.") },
                 shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = BuddyColor.Canvas, focusedContainerColor = BuddyColor.Canvas,
-                    unfocusedBorderColor = BuddyColor.Canvas, focusedBorderColor = BuddyColor.Brand))
-            Text("${about.length} de 300", style = BuddyType.Caption1, color = BuddyColor.InkMuted, modifier = Modifier.align(Alignment.End))
+                    unfocusedBorderColor = if (about.length >= 300) BuddyColor.ErrorRed else BuddyColor.Canvas,
+                    focusedBorderColor = if (about.length >= 300) BuddyColor.ErrorRed else BuddyColor.Brand))
+            // Al llegar al máximo: borde y contador en rojo (iOS, Keyla 26 Nov 2026).
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (about.length >= 300) Text("Llegaste al máximo de 300 caracteres.", style = BuddyType.Caption1, color = BuddyColor.ErrorRed)
+                Spacer(Modifier.weight(1f))
+                Text("${about.length} de 300", style = BuddyType.Caption1, color = if (about.length >= 300) BuddyColor.ErrorRed else BuddyColor.InkMuted)
+            }
             HorizontalDivider(color = BuddyColor.Hairline)
             SubTitle("Contacto", Icons.Outlined.Phone)
             OutlinedTextField(contact, { contact = it.filter { ch -> ch.isDigit() || ch == '+' || ch == ' ' } }, singleLine = true,
