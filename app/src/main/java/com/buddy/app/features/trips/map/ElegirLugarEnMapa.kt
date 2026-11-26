@@ -110,6 +110,8 @@ fun ElegirLugarEnMapa(
     title: String = "Compartir un lugar",
     /** Ubicación del negocio: el nombre es el del negocio y el botón dice "Guardar ubicación". */
     fixedName: String? = null,
+    /** Texto del botón para un punto nuevo (Agregar ubicación en 2 pasos: "Siguiente"). */
+    proposeTitle: String? = null,
     viewModel: TripMapViewModel = hiltViewModel(),
 ) {
     val scope = rememberCoroutineScope()
@@ -569,7 +571,7 @@ fun ElegirLugarEnMapa(
                     }
                     Spacer(Modifier.height(Spacing.md))
                     BotonPrincipal(
-                        texto = if (fixedName != null) "Guardar ubicación" else "Compartir aquí",
+                        texto = proposeTitle ?: if (fixedName != null) "Guardar ubicación" else "Compartir aquí",
                         habilitado = nombre.trim().isNotEmpty() && !isSubmitting && centro != null && !moviendo,
                         cargando = isSubmitting,
                         onClick = {

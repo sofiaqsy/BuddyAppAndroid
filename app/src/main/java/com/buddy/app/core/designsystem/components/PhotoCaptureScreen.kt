@@ -71,6 +71,10 @@ fun PhotoCaptureScreen(maxCount: Int = 1, onDismiss: () -> Unit, onPick: (List<a
         if (maxCount > 1) multi.launch(req) else single.launch(req)
     }
     val hasCamera = remember { ctx.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY) }
+    // Sin cámara (o permiso negado), la galería se abre sola (iOS, Keyla 26 Nov 2026).
+    LaunchedEffect(hasCamera, granted, asked) {
+        if (!hasCamera || (asked && !granted)) openGallery()
+    }
     val controller = remember {
         LifecycleCameraController(ctx).apply { setEnabledUseCases(LifecycleCameraController.IMAGE_CAPTURE) }
     }

@@ -1,5 +1,6 @@
 package com.buddy.app.features.home.inicio
 
+import androidx.compose.material.icons.outlined.Place
 import androidx.compose.ui.focus.focusRequester
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
@@ -438,7 +439,9 @@ fun PlaceCard(card: ApiPlaceCard, large: Boolean, showsCategory: Boolean = true,
               /** Distancia también en tarjetas altas: "Cerca de ti" (Keyla, 24 Nov 2026). */
               showsDistance: Boolean = false,
               /** Ancho propio para filas compactas (perfil, Keyla 25 Nov 2026); misma forma 4:5. */
-              widthOverride: androidx.compose.ui.unit.Dp? = null) {
+              widthOverride: androidx.compose.ui.unit.Dp? = null,
+              /** Ciudad con un pin bajo la categoría (Negocio > Ubicaciones, 26 Nov 2026). */
+              city: String? = null) {
     // Mismas medidas para todas las tarjetas de lugar: las de "Cerca de ti" (Keyla, 25 Nov 2026).
     val portrait = !large
     val width = widthOverride ?: if (large) 264.dp else if (portrait) 150.dp else 168.dp
@@ -471,6 +474,13 @@ fun PlaceCard(card: ApiPlaceCard, large: Boolean, showsCategory: Boolean = true,
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Icon(categoryIcon(cat), null, tint = BuddyColor.Brand, modifier = Modifier.size(14.dp))
                     Text(cat, style = BuddyType.Caption1, color = BuddyColor.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (!city.isNullOrEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // El pin de ubicación de siempre (Keyla, 26 Nov 2026).
+                    LocationPin(Modifier.size(14.dp))
+                    Text(city, style = BuddyType.Caption1, color = BuddyColor.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
@@ -509,7 +519,7 @@ private fun CategoryBadge(category: String, diameter: Dp) {
 
 /** Un solo pin en toda la app (gota con hueco), dibujado como en iOS. */
 @Composable
-private fun LocationPin(modifier: Modifier) {
+internal fun LocationPin(modifier: Modifier) {
     Canvas(modifier) {
         val w = size.width; val h = size.height; val r = w / 2
         val cy = r

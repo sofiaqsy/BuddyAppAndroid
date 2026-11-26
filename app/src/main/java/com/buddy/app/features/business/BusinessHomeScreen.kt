@@ -19,6 +19,11 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.graphics.Color
+import okhttp3.MediaType.Companion.toMediaType
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Notes
 import androidx.compose.material.icons.outlined.Phone
@@ -84,12 +89,16 @@ class BusinessHomeViewModel @Inject constructor(
         val covers: Map<String, String> = emptyMap(),
         /** spotId -> destino, para abrir el lugar en su mapa. */
         val destinations: Map<String, String> = emptyMap(),
+        /** spotId -> ciudad ("Villa Rica"), bajo el nombre en Ubicaciones. */
+        val cities: Map<String, String> = emptyMap(),
         /** Perfil publicado en el servidor (26 Nov 2026). */
         val about: String = "",
         val contact: String = "",
         /** spotId -> horario de esa sede. */
         val hours: Map<String, List<DayHours>> = emptyMap(),
         val profileSaveError: String? = null,
+        /** Lugares nuevos que esperan aprobación ("En revisión", 26 Nov 2026). */
+        val pending: Set<String> = emptySet(),
     )
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state
@@ -143,13 +152,22 @@ class BusinessHomeViewModel @Inject constructor(
     }
 
     /** Sede nueva: un lugar de Buddy que es suyo, o uno nuevo propuesto aquí (iOS BusinessLocationPicker). */
-    fun addLocation(farmId: String, spotId: String?, name: String, lat: Double, lng: Double, done: () -> Unit) {
+    // Paso 2 de "Agregar ubicación": la sede se crea/reclama y luego se sube su portada (iOS, 26 Nov 2026).
+    fun addLocation(farmId: String, spotId: String?, name: String, lat: Double, lng: Double,
+                    photo: android.net.Uri? = null, done: (Boolean) -> Unit) {
         viewModelScope.launch {
-            runCatching {
+            val r = runCatching {
                 val id = spotId ?: homeApi.proposeSpot(com.buddy.app.features.home.data.ProposeSpotBody(name, lat, lng)).id
                 api.claim(id, ClaimBody(farmId))
-            }.onSuccess { done(); load(farmId, force = true) }
-             .onFailure { actionError.value = "No pudimos guardar la ubicación. Si ya es de otro negocio, escríbenos." }
+                if (photo != null) {
+                    val jpeg = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Jpeg.from(ctx, photo) }
+                    val body = okhttp3.RequestBody.create("image/jpeg".toMediaType(), jpeg)
+                    api.uploadOwnerPhoto(id, okhttp3.MultipartBody.Part.createFormData("photo", "foto.jpg", body),
+                        okhttp3.RequestBody.create(null, farmId))
+                }
+            }
+            r.onSuccess { done(true); load(farmId, force = true) }
+             .onFailure { done(false); actionError.value = "No pudimos guardar la ubicación. Revisa tu conexión. Si ya es de otro negocio, escríbenos." }
         }
     }
 
@@ -187,14 +205,21 @@ class BusinessHomeViewModel @Inject constructor(
                 runCatching { api.ownerPhotos(sp.id).photos.minByOrNull { it.position }?.url }.getOrNull()?.let { sp.id to it }
             }.toMap()
             // El destino de cada lugar (para abrir su mapa): lo que hay alrededor de su punto.
+            val pendingIds = mutableSetOf<String>()
             val dests = spots.getOrDefault(emptyList()).filter { it.noPlace != true }.mapNotNull { sp ->
                 runCatching {
-                    mapApi.spotsInBounds(sp.lat - 0.002, sp.lng - 0.002, sp.lat + 0.002, sp.lng + 0.002, 50)
-                        .spots.firstOrNull { it.id.equals(sp.id, true) }?.destinationId
+                    val hit = mapApi.spotsInBounds(sp.lat - 0.002, sp.lng - 0.002, sp.lat + 0.002, sp.lng + 0.002, 50)
+                        .spots.firstOrNull { it.id.equals(sp.id, true) }
+                    if (hit?.estaPendiente == true) pendingIds += sp.id
+                    hit?.destinationId
                 }.getOrNull()?.let { sp.id to it }
             }.toMap()
+            val cities = spots.getOrDefault(emptyList()).mapNotNull { sp ->
+                runCatching { homeApi.searchCuratedSpots(sp.name).spots.firstOrNull { it.id.equals(sp.id, true) }?.destination?.name }
+                    .getOrNull()?.let { sp.id to it }
+            }.toMap()
             _state.update {
-                it.copy(spots = spots.getOrDefault(emptyList()), categories = cats, catalog = catalog, profileLoading = false, covers = covers, destinations = dests,
+                it.copy(spots = spots.getOrDefault(emptyList()), categories = cats, catalog = catalog, profileLoading = false, covers = covers, destinations = dests, cities = cities, pending = pendingIds,
                     profileError = if (spots.isFailure) "Entra a tu cuenta de Buddy en Yo para ver las ubicaciones." else null)
             }
         }
@@ -222,6 +247,20 @@ fun BusinessHomeScreen(
         AlertDialog(onDismissRequest = { vm.actionError.value = null }, text = { Text(msg) },
             confirmButton = { TextButton(onClick = { vm.actionError.value = null }) { Text("Entendido") } })
     }
+    // Agregar ubicación en 2 pasos (iOS, Keyla 26 Nov 2026): 1) el lugar en el mapa,
+    // 2) la ubicación elegida + foto de portada obligatoria + un solo "Guardar ubicación".
+    var picked by remember { mutableStateOf<PickedLocation?>(null) }
+    if (addingLocation && picked != null) {
+        AddLocationStep2(picked!!, business.name, modifier,
+            onBack = { picked = null },
+            onSave = { photo, done ->
+                val p = picked!!
+                vm.addLocation(farmId, p.spotId, p.name, p.lat, p.lng, photo) { ok ->
+                    done(ok); if (ok) { picked = null; addingLocation = false }
+                }
+            })
+        return
+    }
     if (addingLocation) {
         val start = s.spots.firstOrNull()
         Box(modifier.fillMaxSize()) {
@@ -229,11 +268,12 @@ fun BusinessHomeScreen(
                 initialLat = start?.lat ?: -10.7351432, initialLng = start?.lng ?: -75.2676019,
                 categories = emptyList(), isSubmitting = false, errorMessage = null,
                 onBack = { addingLocation = false },
-                onPickSpot = { sp -> vm.addLocation(farmId, sp.id, sp.name, sp.lat ?: 0.0, sp.lng ?: 0.0) { addingLocation = false } },
-                onProposeAt = { nombre, _, lat, lng -> vm.addLocation(farmId, null, nombre.ifBlank { business.name }, lat, lng) { addingLocation = false } },
+                onPickSpot = { sp -> picked = PickedLocation(sp.id, sp.name, sp.lat ?: 0.0, sp.lng ?: 0.0, sp.name) },
+                onProposeAt = { nombre, _, lat, lng -> picked = PickedLocation(null, nombre.ifBlank { business.name }, lat, lng, null) },
                 // Mismo diseño que Compartir un lugar (Keyla, 25 Nov 2026).
                 title = "Agregar ubicación",
                 fixedName = business.name,
+                proposeTitle = "Siguiente",
             )
         }
         return
@@ -276,9 +316,23 @@ fun BusinessHomeScreen(
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Cuenta negocio", style = BuddyType.Subhead, color = BuddyColor.InkMuted)
-                    Text(if (business.role == "owner") "Vinculado" else "Equipo",
-                        style = BuddyType.FootnoteBold, color = BuddyColor.Brand,
-                        modifier = Modifier.clip(CircleShape).background(BuddyColor.SageTint).padding(horizontal = 12.dp, vertical = 5.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(if (business.role == "owner") "Vinculado" else "Equipo",
+                            style = BuddyType.FootnoteBold, color = BuddyColor.Brand,
+                            modifier = Modifier.clip(CircleShape).background(BuddyColor.SageTint).padding(horizontal = 12.dp, vertical = 5.dp))
+                        // Estado en Inicio (iOS, 26 Nov 2026): rojo sin ubicación, ámbar en revisión, verde visible.
+                        if (!s.profileLoading) {
+                            val (label, tint) = when {
+                                s.spots.isEmpty() -> "No visible en Inicio" to BuddyColor.ErrorRed
+                                s.spots.all { it.id in s.pending } -> "En revisión" to BuddyColor.WarningAmber
+                                else -> "Visible en Inicio" to BuddyColor.Brand
+                            }
+                            Text(label, style = BuddyType.FootnoteBold, color = tint, maxLines = 1,
+                                modifier = Modifier.clip(CircleShape)
+                                    .background(if (tint == BuddyColor.Brand) BuddyColor.SageTint else tint.copy(alpha = 0.14f))
+                                    .padding(horizontal = 12.dp, vertical = 5.dp))
+                        }
+                    }
                 }
             }
         }
@@ -512,14 +566,17 @@ private fun MiNegocio(farmId: String, businessName: String, s: BusinessHomeViewM
     var extra by remember(s.categories) { mutableStateOf(s.categories?.secondary.orEmpty()) }
     var locationsOpen by remember { mutableStateOf(true) }
     var generalOpen by remember { mutableStateOf(true) }
+    /** Tocó la alerta "Obligatorio": Ubicaciones en rojo hasta tener una (iOS). */
+    var flagLocations by remember { mutableStateOf(false) }
 
     // "Completa tu perfil" (iOS ProfileChecklist): los mismos 6 pasos y el mismo orden.
     data class Step(val label: String, val done: Boolean, val target: String)
     val steps = buildList {
+        // La ubicación primero: sin ella el negocio no aparece en Inicio (iOS, 26 Nov 2026).
+        add(Step("Agrega tu ubicación", s.spots.isNotEmpty(), "locations"))
         add(Step("Agrega una descripción", savedAbout.isNotBlank(), "general"))
         add(Step("Agrega tu WhatsApp", savedContact.isNotBlank(), "general"))
         if (isLinked) add(Step("Añade tus productos", s.products.isNotEmpty(), "products"))
-        add(Step("Agrega una ubicación", s.spots.isNotEmpty(), "locations"))
         add(Step("Agrega el horario de tus ubicaciones", s.spots.isNotEmpty() && s.spots.all { s.hours[it.id] != null }, "hours"))
         add(Step("Sube fotos de tus ubicaciones", s.covers.isNotEmpty(), "locations"))
     }
@@ -537,32 +594,50 @@ private fun MiNegocio(farmId: String, businessName: String, s: BusinessHomeViewM
             LinearProgressIndicator(progress = { done / steps.size.toFloat() }, color = BuddyColor.Brand,
                 trackColor = BuddyColor.Hairline, modifier = Modifier.fillMaxWidth().height(4.dp).clip(CircleShape))
             next?.let { n ->
+                // Sin ubicación: "Siguiente" es la alerta obligatoria, en rojo (iOS, 26 Nov 2026).
+                val required = s.spots.isEmpty() && n.target == "locations"
+                val tint = if (required) BuddyColor.ErrorRed else BuddyColor.Brand
                 Row(
-                    Modifier.fillMaxWidth().clip(CircleShape).background(BuddyColor.SageTint)
+                    Modifier.fillMaxWidth().clip(if (required) RoundedCornerShape(16.dp) else CircleShape)
+                        .background(if (required) BuddyColor.ErrorRed.copy(alpha = 0.10f) else BuddyColor.SageTint)
                         .clickable {
                             when (n.target) {
                                 "products" -> onShowProducts()
                                 "general" -> generalOpen = true
                                 // Horario: abre la primera sede sin horario (iOS, 26 Nov 2026).
                                 "hours" -> s.spots.firstOrNull { s.hours[it.id] == null }?.let(onEditHours) ?: run { locationsOpen = true }
-                                else -> locationsOpen = true
+                                else -> { locationsOpen = true; if (s.spots.isEmpty()) flagLocations = true }
                             }
-                        }.padding(horizontal = 16.dp, vertical = 14.dp),
+                        }.padding(horizontal = 16.dp, vertical = if (required) 12.dp else 14.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("Siguiente:", style = BuddyType.Footnote, color = BuddyColor.InkMuted)
-                    Text(n.label, style = BuddyType.FootnoteBold, color = BuddyColor.Brand, modifier = Modifier.weight(1f),
-                        maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = BuddyColor.Brand, modifier = Modifier.size(18.dp))
+                    if (required) Icon(Icons.Filled.Error, null, tint = tint, modifier = Modifier.size(20.dp))
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(if (required) "Obligatorio:" else "Siguiente:", style = BuddyType.Footnote,
+                                color = if (required) tint else BuddyColor.InkMuted)
+                            Text(n.label, style = BuddyType.FootnoteBold, color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        if (required) Text("Sin ubicación, tu negocio no aparece en Inicio.", style = BuddyType.Footnote, color = tint)
+                    }
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = tint, modifier = Modifier.size(18.dp))
                 }
             }
         }
 
         Group("Ubicaciones", Icons.Outlined.Explore,
             summary = when { s.profileLoading -> "Cargando…"; s.spots.isEmpty() -> "Agrega una ubicación"; else -> s.spots.joinToString(", ") { it.name } },
-            open = locationsOpen, onToggle = { locationsOpen = !locationsOpen }) {
+            open = locationsOpen, onToggle = { locationsOpen = !locationsOpen },
+            highlight = flagLocations && s.spots.isEmpty()) {
             s.profileError?.let { Text(it, style = BuddyType.Footnote, color = BuddyColor.InkMuted) }
-            androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (flagLocations && s.spots.isEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Icon(Icons.Filled.Error, null, tint = BuddyColor.ErrorRed, modifier = Modifier.size(18.dp))
+                Text("Agrega al menos una ubicación. Es obligatorio para aparecer en Inicio.",
+                    style = BuddyType.FootnoteBold, color = BuddyColor.ErrorRed)
+            }
+            // Centradas cuando caben (una sola sede queda al medio, Keyla 26 Nov 2026).
+            androidx.compose.foundation.lazy.LazyRow(Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)) {
                 // La MISMA tarjeta de Inicio (iOS HomePlaceCard), con la categoría del negocio.
                 val catName = s.catalog.firstOrNull { it.id == s.categories?.main }?.name
                 items(s.spots, key = { it.id }) { sp ->
@@ -591,10 +666,21 @@ private fun MiNegocio(farmId: String, businessName: String, s: BusinessHomeViewM
                             com.buddy.app.core.data.model.ApiPlaceCard(id = sp.id, name = sp.name, lat = sp.lat, lng = sp.lng,
                                 coverUrl = s.covers[sp.id], category = catName),
                             large = false,
+                            city = s.cities[sp.id],
                         )
                     }
                 }
-                item { AddLocationCard(businessName, onAddLocation) }
+                if (s.spots.isEmpty()) item { AddLocationCard(businessName, onAddLocation) }
+            }
+            // Otra sede: un botón con texto, no una tarjeta con "+" (se confundía
+            // con agregar fotos, Keyla 26 Nov 2026).
+            if (s.spots.isNotEmpty()) Row(
+                Modifier.fillMaxWidth().height(44.dp).clip(CircleShape).background(BuddyColor.SageTint).clickable(onClick = onAddLocation),
+                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Add, null, tint = BuddyColor.Brand, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Agregar otra ubicación", style = BuddyType.FootnoteBold, color = BuddyColor.Brand)
             }
         }
 
@@ -679,10 +765,12 @@ private fun MiNegocio(farmId: String, businessName: String, s: BusinessHomeViewM
 
 @Composable
 private fun Group(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector, summary: String, open: Boolean,
-                  onToggle: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+                  onToggle: () -> Unit, highlight: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
     Column(
         Modifier.fillMaxWidth().shadow(4.dp, RoundedCornerShape(22.dp)).clip(RoundedCornerShape(22.dp))
-            .background(BuddyColor.Surface).padding(16.dp),
+            .background(BuddyColor.Surface)
+            .then(if (highlight) Modifier.border(2.dp, BuddyColor.ErrorRed, RoundedCornerShape(22.dp)) else Modifier)
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Row(Modifier.fillMaxWidth().clickable(onClick = onToggle), verticalAlignment = Alignment.CenterVertically,
@@ -782,5 +870,88 @@ private fun Pill(t: String, dark: Boolean, modifier: Modifier = Modifier, onClic
     Box(modifier.height(44.dp).clip(CircleShape).background(if (dark) BuddyColor.Brand else BuddyColor.SageTint).clickable(onClick = onClick),
         contentAlignment = Alignment.Center) {
         Text(t, style = BuddyType.FootnoteBold, color = if (dark) BuddyColor.InkInverse else BuddyColor.Brand)
+    }
+}
+
+
+/** Lo elegido en el paso 1 de "Agregar ubicación". label = nombre del lugar existente; null = punto nuevo. */
+data class PickedLocation(val spotId: String?, val name: String, val lat: Double, val lng: Double, val label: String?)
+
+/** Paso 2 (iOS, Keyla 26 Nov 2026): ubicación elegida arriba, foto de portada obligatoria con la
+ *  misma tarjeta de Inicio como vista previa, y un solo "Guardar ubicación". Nada se guarda antes. */
+@Composable
+private fun AddLocationStep2(picked: PickedLocation, businessName: String, modifier: Modifier,
+                             onBack: () -> Unit, onSave: (android.net.Uri, (Boolean) -> Unit) -> Unit) {
+    androidx.activity.compose.BackHandler(onBack = onBack)
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var photo by remember { mutableStateOf<android.net.Uri?>(null) }
+    var saving by remember { mutableStateOf(false) }
+    // Punto nuevo: se muestra la calle, no el nombre del negocio.
+    var street by remember(picked) { mutableStateOf<String?>(null) }
+    LaunchedEffect(picked) {
+        if (picked.label == null) street = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                @Suppress("DEPRECATION")
+                android.location.Geocoder(ctx).getFromLocation(picked.lat, picked.lng, 1)?.firstOrNull()
+                    ?.let { a -> listOfNotNull(a.thoroughfare?.let { t -> a.subThoroughfare?.let { "$t $it" } ?: t }, a.locality).joinToString(", ") }
+                    ?.takeIf { it.isNotBlank() }
+            }.getOrNull()
+        }
+    }
+    val pick = com.buddy.app.core.designsystem.components.rememberPhotoCapture { uris -> uris.firstOrNull()?.let { photo = it } }
+    Column(modifier.fillMaxSize().background(BuddyColor.Canvas).statusBarsPadding()) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Volver", tint = BuddyColor.Brand) }
+            Text("Agregar ubicación", style = BuddyType.Headline, color = BuddyColor.Ink, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(48.dp))
+        }
+        Column(Modifier.fillMaxWidth().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Paso 2 de 2", style = BuddyType.Caption1, color = BuddyColor.InkMuted)
+            Text("UBICACIÓN ELEGIDA", style = BuddyType.Caption1.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp), color = BuddyColor.InkMuted)
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(BuddyColor.Surface).clickable(onClick = onBack).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(BuddyColor.PaleSage), contentAlignment = Alignment.Center) {
+                    com.buddy.app.features.home.inicio.LocationPin(Modifier.size(16.dp))
+                }
+                Text(picked.label ?: street ?: "Punto en el mapa", style = BuddyType.FootnoteBold, color = BuddyColor.Ink,
+                    maxLines = 2, modifier = Modifier.weight(1f))
+                Text("Cambiar", style = BuddyType.Caption1.copy(fontWeight = FontWeight.SemiBold), color = BuddyColor.Brand)
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = BuddyColor.Brand, modifier = Modifier.size(18.dp))
+            }
+            Text("FOTO DE PORTADA", style = BuddyType.Caption1.copy(fontWeight = FontWeight.SemiBold, letterSpacing = 2.sp), color = BuddyColor.InkMuted,
+                modifier = Modifier.padding(top = 8.dp))
+            Text("Es la foto que verán los viajeros en Inicio.", style = BuddyType.Footnote, color = BuddyColor.InkMuted)
+            // La misma tarjeta (y medidas) de los lugares en Inicio.
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Box(Modifier.clickable(enabled = !saving) { pick() }
+                    .semantics { contentDescription = if (photo == null) "Elegir foto de portada" else "Cambiar foto de portada" }) {
+                    com.buddy.app.features.home.inicio.PlaceCard(
+                        com.buddy.app.core.data.model.ApiPlaceCard(id = "preview", name = picked.label ?: businessName,
+                            lat = picked.lat, lng = picked.lng, coverUrl = photo?.toString()),
+                        large = false)
+                    if (photo == null) Box(Modifier.matchParentSize().padding(bottom = 44.dp), contentAlignment = Alignment.Center) {
+                        Box(Modifier.size(52.dp).clip(CircleShape).background(BuddyColor.Brand), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Filled.Add, null, tint = Color.White, modifier = Modifier.size(24.dp))
+                        }
+                    }
+                }
+            }
+            val ready = photo != null && !saving
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp).height(52.dp).clip(CircleShape)
+                    .background(if (ready) BuddyColor.Ink else BuddyColor.InkMuted.copy(alpha = 0.4f))
+                    .clickable(enabled = ready) {
+                        saving = true
+                        onSave(photo!!) { ok -> if (!ok) saving = false }
+                    },
+                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                if (saving) {
+                    androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = BuddyColor.InkInverse)
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text("Guardar ubicación", style = BuddyType.Headline, color = BuddyColor.InkInverse)
+            }
+        }
     }
 }
