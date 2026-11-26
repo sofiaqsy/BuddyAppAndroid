@@ -174,6 +174,14 @@ fun YoScreen(
         if (session?.isVerified == true) viewModel.load()
     }
 
+    // Lugar nuevo del mapa: fotos primero; se crea al publicar (26 Nov 2026).
+    tripsState.nuevoLugar?.let { lugar ->
+        com.buddy.app.features.trips.RecomendarFotosScreen(lugar, onClose = tripsViewModel::cancelNuevoLugar) { jpegs, done ->
+            tripsViewModel.publicarNuevoLugar(lugar, jpegs) { ok -> if (ok) viewModel.load(); done(ok) }
+        }
+        return
+    }
+
     if (tripsState.showShareLugarSheet) {
         com.buddy.app.features.trips.CompartirLugarSheet(
             step = shareLugarStep,
@@ -196,9 +204,7 @@ fun YoScreen(
 
     // Selector de foto de perfil — espejo del PhotosPicker del avatar (iOS)
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val avatarPicker = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
-    ) { uri ->
+    val avatarPicker = com.buddy.app.core.designsystem.components.rememberPhotoCapture { uris -> val uri = uris.firstOrNull()
         if (uri != null) {
             scope.launch {
                 val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -250,11 +256,7 @@ fun YoScreen(
                 state,
                 Modifier.padding(horizontal = Spacing.edge, vertical = Spacing.lg),
                 onPickAvatar = {
-                    avatarPicker.launch(
-                        androidx.activity.result.PickVisualMediaRequest(
-                            androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
-                        ),
-                    )
+                    avatarPicker()
                 },
             )
             // 2 — Bio

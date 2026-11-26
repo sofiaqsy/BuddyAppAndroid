@@ -298,6 +298,14 @@ fun TripsScreen(
     }
     }
 
+    // Lugar nuevo del mapa: fotos primero; se crea al publicar (26 Nov 2026).
+    state.nuevoLugar?.let { lugar ->
+        RecomendarFotosScreen(lugar, onClose = viewModel::cancelNuevoLugar) { jpegs, done ->
+            viewModel.publicarNuevoLugar(lugar, jpegs) { ok -> if (ok) viewModel.load(); done(ok) }
+        }
+        return
+    }
+
     if (state.showShareLugarSheet) {
         CompartirLugarSheet(
             step = shareLugarStep,

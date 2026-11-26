@@ -302,8 +302,7 @@ fun TripMapScreen(
     // recomendación y las sube una por una, con reintentos, mostrando el avance.
     var subida by remember { mutableStateOf<String?>(null) }
     var subidaSpot by remember { mutableStateOf<ApiGuideSpot?>(null) }
-    val recommendPicker = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(10)) { uris ->
+    val recommendPicker = com.buddy.app.core.designsystem.components.rememberPhotoCapture(10) { uris ->
         val spot = subidaSpot
         if (uris.isNotEmpty() && spot != null) scope.launch {
             subida = "Subiendo tu foto…"
@@ -322,8 +321,7 @@ fun TripMapScreen(
             } else subida = "No se pudo subir la foto. Revisa tu señal."
         }
     }
-    val photoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
+    val photoPicker = com.buddy.app.core.designsystem.components.rememberPhotoCapture { uris -> val uri = uris.firstOrNull()
         val target = ownerUpload
         if (uri != null && target != null) scope.launch {
             runCatching {
@@ -776,8 +774,7 @@ fun TripMapScreen(
                                 },
                                 onAddPhoto = {
                                     ownerUpload = spot.id to farmId
-                                    photoPicker.launch(androidx.activity.result.PickVisualMediaRequest(
-                                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                    photoPicker()
                                 },
                             )
                         },
@@ -809,8 +806,7 @@ fun TripMapScreen(
                             // Directo al selector de fotos, sin editor (iOS, 25 Nov 2026).
                             // El journey nace al elegir las fotos, no al abrir la ficha.
                             subidaSpot = spot
-                            recommendPicker.launch(androidx.activity.result.PickVisualMediaRequest(
-                                androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                            recommendPicker()
                         },
                         startOnPhotos = recommendMode,
                         onNavigate = { navigationTarget = spot },

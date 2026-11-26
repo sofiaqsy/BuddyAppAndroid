@@ -37,8 +37,8 @@ android {
         // 9: Home a una sola pantalla (carrusel vertical infinito, CTA con
         // destino), bug del botón "Cancelar solicitud" y de solicitudes
         // huérfanas al cerrar rápido — espejo de iOS 1.1.2.
-        versionCode = 15
-        versionName = "1.1.6"
+        versionCode = 16
+        versionName = "1.1.7"
 
         buildConfigField("String", "API_BASE_URL", "\"https://buddy-core-504b393f8333.herokuapp.com/v1/\"")
         // Dominio público de los enlaces que se comparten fuera de la app. NO es
@@ -144,6 +144,11 @@ dependencies {
     // cuando la app no viene de Play (instalación directa, pruebas): arranca y
     // se desplaza más rápido desde la primera vez.
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+    // Cámara propia con la galería en la misma pantalla (Keyla, 26 Nov 2026).
+    implementation("androidx.camera:camera-core:1.4.1")
+    implementation("androidx.camera:camera-camera2:1.4.1")
+    implementation("androidx.camera:camera-lifecycle:1.4.1")
+    implementation("androidx.camera:camera-view:1.4.1")
 
     testImplementation(libs.junit)
 

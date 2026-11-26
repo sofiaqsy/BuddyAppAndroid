@@ -262,9 +262,7 @@ fun ChatScreen(
     }
 
     // ── Launchers: fotos, cámara, permiso de micrófono ───────────────────────
-    val photoPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
+    val photoPicker = com.buddy.app.core.designsystem.components.rememberPhotoCapture { uris -> val uri = uris.firstOrNull()
         if (uri != null) {
             scope.launch {
                 val bytes = runCatching {
@@ -642,7 +640,7 @@ fun ChatScreen(
             AttachSheetContent(
                 onPhotos = {
                     showAttachSheet = false
-                    photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    photoPicker()
                 },
                 onCamera = {
                     showAttachSheet = false

@@ -23,6 +23,9 @@ import javax.inject.Inject
  * Espejo del estado de TripsView (iOS): trips visibles (active/planning,
  * activos primero), selección, cancelación optimista de viaje/lugar.
  */
+/** Lugar nuevo nombrado en el mapa, aún sin crear en el servidor. */
+data class NuevoLugar(val nombre: String, val categoriaId: String?, val lat: Double, val lng: Double)
+
 @HiltViewModel
 class TripsViewModel @Inject constructor(
     private val api: HomeApi,
@@ -59,6 +62,8 @@ class TripsViewModel @Inject constructor(
         val shareLugarLng: Double? = null,
         /** Lugar elegido en la hoja. One-shot para navegar: NO se creó nada. */
         val lugarElegido: com.buddy.app.features.home.data.ApiNearbySpot? = null,
+        /** Lugar nuevo nombrado en el mapa: se crea recién al publicar con fotos (iOS, 26 Nov 2026). */
+        val nuevoLugar: NuevoLugar? = null,
         val spotCategories: List<com.buddy.app.features.home.data.ApiSpotCategoryRef> = emptyList(),
         val isSharingLugar: Boolean = false,
         val shareLugarError: String? = null,
@@ -268,34 +273,36 @@ class TripsViewModel @Inject constructor(
                 }
                 return@launch
             }
-            // El spot SÍ se propone: es el lugar en sí, y el admin lo tiene que
-            // revisar exista o no una recomendación. Lo que no se crea aquí es
-            // el journey — ése nace al publicar la primera foto.
-            runCatching {
-                api.proposeSpot(
-                    com.buddy.app.features.home.data.ProposeSpotBody(
-                        name = nombre.trim(), lat = loc.lat, lng = loc.lng, categoryId = categoriaId,
-                    ),
-                )
-            }.onSuccess { spot ->
-                Log.d(TAG, "proposeSpot ok id=${spot.id.take(8)} status=${spot.status} destino=${spot.destinationId?.take(8)}")
-                _state.update {
-                    it.copy(
-                        isSharingLugar = false, showShareLugarSheet = false,
-                        lugarElegido = com.buddy.app.features.home.data.ApiNearbySpot(
-                            id = spot.id, name = spot.name, lat = spot.lat, lng = spot.lng,
-                            coverUrl = spot.coverUrl, destinationId = spot.destinationId,
-                            status = spot.status,
-                        ),
+            // Nada se crea todavía: el lugar y la recomendación nacen al publicar
+            // con fotos. Antes quedaba un lugar vacío si no se subía ninguna (Keyla, 26 Nov 2026).
+            _state.update {
+                it.copy(isSharingLugar = false, showShareLugarSheet = false,
+                    nuevoLugar = NuevoLugar(nombre.trim(), categoriaId, loc.lat, loc.lng))
+            }
+        }
+    }
+
+    fun cancelNuevoLugar() = _state.update { it.copy(nuevoLugar = null) }
+
+    /** Publicar: propone el lugar, crea la recomendación, sube las fotos y la publica. */
+    fun publicarNuevoLugar(lugar: NuevoLugar, jpegs: List<ByteArray>, done: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val ok = runCatching {
+                val spot = api.proposeSpot(com.buddy.app.features.home.data.ProposeSpotBody(
+                    name = lugar.nombre, lat = lugar.lat, lng = lugar.lng, categoryId = lugar.categoriaId))
+                val journey = tripRepo.shareLugar(spotId = spot.id, lat = lugar.lat, lng = lugar.lng)
+                val parts = jpegs.flatMapIndexed { i, jpg ->
+                    listOf(
+                        okhttp3.MultipartBody.Part.createFormData("page_$i", "page_$i.jpg",
+                            okhttp3.RequestBody.create(okhttp3.MediaType.Companion.run { "image/jpeg".toMediaType() }, jpg)),
+                        okhttp3.MultipartBody.Part.createFormData("client_page_id_$i", java.util.UUID.randomUUID().toString()),
                     )
                 }
-            }.onFailure { e ->
-                Log.e(TAG, "proposeSpot failed", e)
-                _state.update {
-                    it.copy(isSharingLugar = false,
-                            shareLugarError = "No pudimos registrar este lugar. Inténtalo de nuevo.")
-                }
-            }
+                api.uploadJourneyPages(journey.id, parts)
+                api.publishJourney(journey.id, com.buddy.app.features.home.data.PublishBody(status = "completed", isPublic = true))
+            }.onFailure { Log.e(TAG, "publicarNuevoLugar failed", it) }.isSuccess
+            if (ok) _state.update { it.copy(nuevoLugar = null) }
+            done(ok)
         }
     }
 

@@ -156,10 +156,8 @@ fun TripCanvasEditor(
     }
 
     // Galería (hasta 10, como iOS)
-    val photoPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickMultipleVisualMedia(CanvasState.MAX_ITEMS),
-    ) { uris ->
-        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+    val photoPicker = com.buddy.app.core.designsystem.components.rememberPhotoCapture(CanvasState.MAX_ITEMS) { uris ->
+        if (uris.isEmpty()) return@rememberPhotoCapture
         scope.launch {
             val bitmaps = withContext(Dispatchers.IO) {
                 uris.mapNotNull { uri ->
@@ -305,7 +303,7 @@ fun TripCanvasEditor(
                 Column(
                     Modifier
                         .fillMaxSize()
-                        .clickable { photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        .clickable { photoPicker() },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
@@ -465,7 +463,7 @@ fun TripCanvasEditor(
                 PillDivider()
                 PillAction(Icons.Filled.AddPhotoAlternate, "Galería") {
                     activePanel = ActivePanel.NONE
-                    photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    photoPicker()
                 }
                 PillDivider()
                 PillAction(

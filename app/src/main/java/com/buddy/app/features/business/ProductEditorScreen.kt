@@ -245,7 +245,8 @@ fun ProductEditorScreen(
 private fun SizeCard(s: SizeDraft, removable: Boolean, onRemove: () -> Unit, onRemovePhoto: () -> Unit) {
     var photoMenu by remember { mutableStateOf(false) }
     var confirmPhoto by remember { mutableStateOf(false) }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> if (uri != null) s.newPhoto = uri }
+    // Cámara con la galería en la misma pantalla (26 Nov 2026).
+    val picker = com.buddy.app.core.designsystem.components.rememberPhotoCapture { uris -> uris.firstOrNull()?.let { s.newPhoto = it } }
     var unitOpen by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxWidth().shadow(3.dp, RoundedCornerShape(16.dp)).clip(RoundedCornerShape(16.dp))
@@ -258,7 +259,7 @@ private fun SizeCard(s: SizeDraft, removable: Boolean, onRemove: () -> Unit, onR
                 Modifier.size(72.dp).clip(RoundedCornerShape(12.dp)).background(BuddyColor.SurfaceRaised)
                     // Tocar: elegir otra foto. Mantener presionada: "Quitar foto" (iOS).
                     .combinedClickable(
-                        onClick = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                        onClick = { picker() },
                         onLongClick = { if (s.newPhoto != null || s.photoUrl != null) photoMenu = true },
                     )
                     .semantics { contentDescription = "Foto de este tamaño" },
