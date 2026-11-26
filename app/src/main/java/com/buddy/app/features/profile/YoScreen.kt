@@ -1,5 +1,8 @@
 package com.buddy.app.features.profile
 
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.heightIn
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -102,6 +105,8 @@ fun YoScreen(
     onOpenTrips: () -> Unit = {},
     /** Abre la ficha de un lugar que recomiendo, en el mapa de su destino. */
     onOpenPlace: (com.buddy.app.core.data.model.ApiPlaceCard) -> Unit = {},
+    /** Lugar elegido para recomendar: su ficha abre en Fotos con "Añadir foto". */
+    onRecommendPlace: (com.buddy.app.core.data.model.ApiPlaceCard) -> Unit = onOpenPlace,
     /** El editor de fotos del lugar recién elegido — el mismo del tab Tu trip. */
     onOpenBook: (ApiJourney, Int, Boolean) -> Unit = { _, _, _ -> },
     viewModel: YoViewModel = hiltViewModel(),
@@ -121,7 +126,7 @@ fun YoScreen(
     // recomendación.
     androidx.compose.runtime.LaunchedEffect(tripsState.lugarElegido) {
         tripsState.lugarElegido?.let { spot ->
-            onOpenPlace(
+            onRecommendPlace(
                 com.buddy.app.core.data.model.ApiPlaceCard(
                     id = spot.id,
                     name = spot.name,
@@ -736,8 +741,9 @@ private fun LugaresQueRecomiendasSection(
     Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
         SectionHeader("LUGARES QUE RECOMIENDAS", shares.size)
         Row(
-            Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = Spacing.edge),
-            horizontalArrangement = Arrangement.spacedBy(3.dp),
+            Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = Spacing.edge)
+                .height(androidx.compose.foundation.layout.IntrinsicSize.Max),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             // Siempre primero: es la ACCIÓN, no un elemento más de la colección.
             // Al final habría que arrastrar toda la lista para encontrarla, y el
@@ -745,7 +751,7 @@ private fun LugaresQueRecomiendasSection(
             if (puedeRecomendar) {
                 Column(
                     Modifier
-                        .size(width = 132.dp, height = 158.dp)
+                        .width(120.dp).heightIn(min = 200.dp).fillMaxHeight()
                         .clip(RoundedCornerShape(Radius.md))
                         .background(BuddyColor.Surface)
                         // Punteado: se lee como un hueco por llenar y no como un
@@ -774,51 +780,10 @@ private fun LugaresQueRecomiendasSection(
                 }
             }
 
+            // La misma tarjeta de "Cerca de ti" en Inicio (iOS, 25 Nov 2026).
             shares.forEach { lugar ->
-                Column(
-                    Modifier
-                        .size(width = 132.dp, height = 158.dp)
-                        .clip(RoundedCornerShape(Radius.md))
-                        .background(BuddyColor.SurfaceRaised)
-                        .clickable { onOpenPlace(lugar) },
-                ) {
-                    Box(Modifier.fillMaxWidth().weight(1f)) {
-                        lugar.coverUrl?.let {
-                            coil.compose.AsyncImage(
-                                model = it, contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        }
-                        // Propuesto y aún sin revisar: solo lo ve quien lo propuso
-                        // hasta que se apruebe. Decirlo evita que parezca publicado
-                        // (mismo badge que iOS). Sin icono de alerta: es una espera,
-                        // no un problema del usuario.
-                        if (lugar.estaPendiente) {
-                            // Dos líneas: la tarjeta mide 119 de ancho y en una
-                            // sola el texto se cortaba ("Pendiente de apro…").
-                            Text(
-                                "Pendiente de\naprobación",
-                                style = BuddyType.Caption2,
-                                color = BuddyColor.Ink,
-                                maxLines = 2,
-                                modifier = Modifier
-                                    .padding(6.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(BuddyColor.WarningAmber.copy(alpha = 0.9f))
-                                    .padding(horizontal = 6.dp, vertical = 3.dp),
-                            )
-                        }
-                    }
-                    Column(Modifier.padding(horizontal = 8.dp, vertical = 7.dp)) {
-                        Text(lugar.name, style = BuddyType.Caption1, color = BuddyColor.Ink, maxLines = 1)
-                        // El pie es cuántas fotos aporté a ese lugar; los buddies
-                        // del destino no vienen al caso en mi propio perfil.
-                        Text(
-                            if (lugar.photoCount == 1) "1 foto" else "${lugar.photoCount} fotos",
-                            style = BuddyType.Caption2, color = BuddyColor.InkMuted, maxLines = 1,
-                        )
-                    }
+                Box(Modifier.clickable { onOpenPlace(lugar) }) {
+                    com.buddy.app.features.home.inicio.PlaceCard(card = lugar, large = false, tall = true, showsDistance = true, widthOverride = 120.dp)
                 }
             }
         }
@@ -872,7 +837,7 @@ private fun TripsSection(
                                     TripCell.Ghost -> Box(
                                         Modifier
                                             .weight(1f)
-                                            .aspectRatio(1f)
+                                            .aspectRatio(4f / 5f)
                                             .clip(RoundedCornerShape(Radius.sm))
                                             .background(BuddyColor.Surface)
                                             .clickable(onClick = onOpenTrips),
@@ -981,7 +946,7 @@ private fun OwnedTripCell(
 @Composable
 private fun TripGridCell(journey: ApiJourney, modifier: Modifier = Modifier) {
     val thumb = journey.pageThumbs?.firstOrNull() ?: journey.coverUrl ?: journey.destination?.coverUrl
-    Box(modifier.aspectRatio(1f).clip(RoundedCornerShape(Radius.sm)).background(BuddyColor.GroupedBg)) {
+    Box(modifier.aspectRatio(4f / 5f).clip(RoundedCornerShape(Radius.sm)).background(BuddyColor.GroupedBg)) {
         if (thumb != null) {
             AsyncImage(
                 model = thumb, contentDescription = journey.title,

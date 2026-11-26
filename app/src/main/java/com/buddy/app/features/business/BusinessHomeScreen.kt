@@ -187,6 +187,9 @@ fun BusinessHomeScreen(
                 onBack = { addingLocation = false },
                 onPickSpot = { sp -> vm.addLocation(farmId, sp.id, sp.name, sp.lat ?: 0.0, sp.lng ?: 0.0) { addingLocation = false } },
                 onProposeAt = { nombre, _, lat, lng -> vm.addLocation(farmId, null, nombre.ifBlank { business.name }, lat, lng) { addingLocation = false } },
+                // Mismo diseño que Compartir un lugar (Keyla, 25 Nov 2026).
+                title = "Agregar ubicación",
+                fixedName = business.name,
             )
         }
         return

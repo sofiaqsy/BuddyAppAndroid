@@ -74,6 +74,7 @@ fun BuddyRoot() {
     /** El lugar que venía elegido al abrir el mapa, si se llegó tocando UNO
      *  concreto. Nulo cuando lo que se abrió es el destino entero. */
     var mapSpotId by androidx.compose.runtime.remember { mutableStateOf<String?>(null) }
+    var mapRecommend by androidx.compose.runtime.remember { mutableStateOf(false) }
     /** Perfil de otra persona, como capa encima de la app.
      *
      *  Encima y no en lugar de: montarlo con un `return` desmontaría el tab de
@@ -131,16 +132,17 @@ fun BuddyRoot() {
     mapJourney?.let { journey ->
         // Mapa: el arrastre del borde lo haría el mapa (se desplaza con el
         // dedo), así que aquí solo el volver del sistema — no lo tenía.
-        androidx.activity.compose.BackHandler { mapJourney = null; mapSpotId = null }
+        androidx.activity.compose.BackHandler { mapJourney = null; mapSpotId = null; mapRecommend = false }
         com.buddy.app.features.trips.map.TripMapScreen(
+            recommendMode = mapRecommend,
             journey = journey,
             initialSpotId = mapSpotId,
-            canRecommend = conexionesState.isApprovedBuddy,
+            canRecommend = conexionesState.isApprovedBuddy || mapRecommend,
             onOpenBook = { j, page, isStandaloneShare ->
                 mapJourney = null; mapSpotId = null
                 bookJourney = Triple(j, page, isStandaloneShare)
             },
-            onBack = { mapJourney = null; mapSpotId = null },
+            onBack = { mapJourney = null; mapSpotId = null; mapRecommend = false },
         )
         return
     }
@@ -308,6 +310,21 @@ fun BuddyRoot() {
             ) else YoScreen(
                 modifier,
                 onOpenTrips = { misTripsOpen = true },
+                onRecommendPlace = { card ->
+                    val destId = card.destinationId
+                    if (destId != null) {
+                        mapRecommend = true
+                        mapSpotId = card.id
+                        mapJourney = com.buddy.app.core.data.model.ApiJourney(
+                            id = card.id, title = card.destinationName ?: card.name, status = "active",
+                            destination = com.buddy.app.core.data.model.ApiDestinationRef(
+                                id = destId, name = card.destinationName ?: card.name,
+                                city = card.destinationName ?: card.name, lat = card.lat, lng = card.lng,
+                            ),
+                            destinationId = destId,
+                        )
+                    }
+                },
                 onOpenPlace = { card ->
                     val destId = card.destinationId
                     if (destId != null) {
@@ -370,6 +387,7 @@ fun BuddyRoot() {
                 TripsScreen(
                     Modifier,
                     embedded = true,
+                onTripCancelled = { misTripsOpen = false },
                 onOpenPlace = { card ->
                     val destId = card.destinationId
                     if (destId != null) {

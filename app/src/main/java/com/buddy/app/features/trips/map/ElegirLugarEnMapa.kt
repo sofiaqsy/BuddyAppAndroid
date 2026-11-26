@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -22,6 +24,14 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Navigation
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -85,6 +95,7 @@ import org.osmdroid.views.CustomZoomButtonsController
  * el mismo endpoint del mapa del destino: al mover o hacer zoom aparece lo
  * que hay en pantalla.
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ElegirLugarEnMapa(
     initialLat: Double?,
@@ -95,6 +106,10 @@ fun ElegirLugarEnMapa(
     onBack: () -> Unit,
     onPickSpot: (ApiNearbySpot) -> Unit,
     onProposeAt: (nombre: String, categoriaId: String?, lat: Double, lng: Double) -> Unit,
+    /** Título de la barra (iOS: "Compartir un lugar" / "Agregar ubicación"). */
+    title: String = "Compartir un lugar",
+    /** Ubicación del negocio: el nombre es el del negocio y el botón dice "Guardar ubicación". */
+    fixedName: String? = null,
     viewModel: TripMapViewModel = hiltViewModel(),
 ) {
     val scope = rememberCoroutineScope()
@@ -106,18 +121,29 @@ fun ElegirLugarEnMapa(
     // Búsqueda por texto: mueve el mapa, no elige nada por sí sola.
     var consulta by remember { mutableStateOf("") }
     var resultados by remember { mutableStateOf<List<android.location.Address>>(emptyList()) }
+    // Igual que iOS (Keyla, 25 Nov 2026): ruedita mientras busca, el buscador muestra
+    // el punto elegido sin buscar, y al mover el mapa se repite la búsqueda escrita.
+    var buscando by remember { mutableStateOf(false) }
+    var autoRelleno by remember { mutableStateOf(false) }
+    var buscadorActivo by remember { mutableStateOf(false) }
+    var rebuscar by remember { mutableStateOf(0) }
     val ctxBusqueda = androidx.compose.ui.platform.LocalContext.current
-    androidx.compose.runtime.LaunchedEffect(consulta) {
+    androidx.compose.runtime.LaunchedEffect(consulta, rebuscar) {
+        if (autoRelleno) { autoRelleno = false; return@LaunchedEffect }
         val q = consulta.trim()
         if (q.length < 2) {
             if (resultados.isNotEmpty()) android.util.Log.d(TAG, "[t+${ms()}ms] búsqueda vacía/corta — limpio resultados")
-            resultados = emptyList(); return@LaunchedEffect
+            resultados = emptyList(); buscando = false; return@LaunchedEffect
         }
+        buscando = true
         kotlinx.coroutines.delay(400)
         val inicio = android.os.SystemClock.elapsedRealtime()
         val c = mapRef?.mapCenter
+        val span = mapRef?.boundingBox?.let { maxOf(it.latNorth - it.latSouth, it.lonEast - it.lonWest) } ?: 0.0
         android.util.Log.d(TAG, "[t+${ms()}ms] búsqueda \"$q\" iniciada — cerca de ${c?.let { "(${it.latitude},${it.longitude})" } ?: "ninguna parte"}")
-        val r = withContext(Dispatchers.IO) { buscarLugar(ctxBusqueda, q, c?.latitude, c?.longitude) }
+        val r = try {
+            withContext(Dispatchers.IO) { buscarLugar(ctxBusqueda, q, c?.latitude, c?.longitude, span) }
+        } finally { buscando = false }
         resultados = r
         android.util.Log.d(TAG, "[t+${ms()}ms] búsqueda \"$q\" → ${r.size} resultado(s) en ${android.os.SystemClock.elapsedRealtime() - inicio}ms")
         r.forEachIndexed { i, a ->
@@ -132,7 +158,12 @@ fun ElegirLugarEnMapa(
     }
     var moviendo by remember { mutableStateOf(false) }
     var direccion by remember { mutableStateOf<String?>(null) }
-    var nombre by remember { mutableStateOf("") }
+    var nombre by remember { mutableStateOf(fixedName ?: "") }
+    var altoPanel by remember { mutableStateOf(0) }
+    var altoBarra by remember { mutableStateOf(0) }
+    val densidad = androidx.compose.ui.platform.LocalDensity.current
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val teclado = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     var categoriaId by remember { mutableStateOf<String?>(null) }
     var tooWide by remember { mutableStateOf(false) }
 
@@ -152,6 +183,13 @@ fun ElegirLugarEnMapa(
         centro = GeoPoint(initialLat, initialLng)
     }
     DisposableEffect(Unit) { onDispose { android.util.Log.d(TAG, "cerrado"); mapRef?.onDetach() } }
+    // Dentro de un Dialog la ventana se desplazaba con el teclado y escondía la barra:
+    // el panel ya sube solo (imePadding), así que la ventana no se mueve.
+    val vista = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.SideEffect {
+        (vista.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+            ?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+    }
 
     // Dirección del centro: se pide cuando el mapa se detiene, no en cada frame.
     val contexto = androidx.compose.ui.platform.LocalContext.current
@@ -161,6 +199,10 @@ fun ElegirLugarEnMapa(
         val inicio = android.os.SystemClock.elapsedRealtime()
         val texto = withContext(Dispatchers.IO) { direccionDe(contexto, c.latitude, c.longitude) }
         direccion = texto ?: "Sin dirección"
+        // Al soltar el mapa el buscador muestra el punto elegido (sin buscar).
+        if (!buscadorActivo && texto != null && texto != consulta) {
+            autoRelleno = true; consulta = texto; resultados = emptyList()
+        }
         val ahora = android.os.SystemClock.elapsedRealtime()
         android.util.Log.d(TAG, "[t+${ms()}ms] dirección=${texto ?: "null"} — geocoder ${ahora - inicio}ms" +
             (if (soltadoEn > 0) ", ${ahora - soltadoEn}ms desde que soltaste el mapa" else ""))
@@ -171,7 +213,7 @@ fun ElegirLugarEnMapa(
 
     Box(Modifier.fillMaxSize().background(BuddyColor.Canvas)) {
         AndroidView(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().padding(top = with(densidad) { altoBarra.toDp() }),
             factory = { ctx ->
                 Configuration.getInstance().userAgentValue = ctx.packageName
                 MapView(ctx).apply {
@@ -186,6 +228,13 @@ fun ElegirLugarEnMapa(
                         controller.setCenter(GeoPoint(20.0, 0.0))
                     }
                     mapRef = this
+                    // Tocar el mapa cierra el teclado (Keyla, 25 Nov 2026); el mapa sigue moviéndose.
+                    setOnTouchListener { _, ev ->
+                        if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+                            focusManager.clearFocus(); teclado?.hide()
+                        }
+                        false
+                    }
 
                     // Mismo patrón que el mapa del destino: tras 600 ms sin
                     // gestos se pide lo que hay en pantalla (con margen del
@@ -244,6 +293,8 @@ fun ElegirLugarEnMapa(
                                     centro = GeoPoint(c.latitude, c.longitude)
                                     android.util.Log.d(TAG, "[t+${ms()}ms] mapa detenido — centro=(${c.latitude},${c.longitude})")
                                     pedirEnPantalla()
+                                    // Con texto escrito, se busca otra vez en la nueva zona.
+                                    if (buscadorActivo && consulta.trim().length >= 2) rebuscar++
                                     return false
                                 }
                                 override fun onScroll(event: ScrollEvent?) = alSoltar()
@@ -265,7 +316,7 @@ fun ElegirLugarEnMapa(
                     map.overlays.add(
                         Marker(map).apply {
                             position = GeoPoint(spot.lat, spot.lng)
-                            title = spot.name
+                            this.title = spot.name
                             icon = pinDeLugar(map.context, spot.name, esElegido, conNombre = true)
                             setAnchor(Marker.ANCHOR_CENTER, anclaVerticalDelPin(map.context, esElegido, conNombre = true))
                             infoWindow = null
@@ -289,13 +340,13 @@ fun ElegirLugarEnMapa(
         // centro del mapa es el centro de este Box.)
         if (elegido == null) {
             val ancho = 2.dp
-            Box(Modifier.align(Alignment.Center).size(6.dp).clip(CircleShape).background(BuddyColor.Ink.copy(alpha = 0.25f)))
+            Box(Modifier.align(Alignment.Center).offset(y = with(densidad) { (altoBarra / 2).toDp() }).size(6.dp).clip(CircleShape).background(BuddyColor.Ink.copy(alpha = 0.25f)))
             Box(
-                Modifier.align(Alignment.Center).offset(y = (-8).dp - elevacion)
+                Modifier.align(Alignment.Center).offset(y = with(densidad) { (altoBarra / 2).toDp() } - 8.dp - elevacion)
                     .size(width = ancho, height = 16.dp).background(BuddyColor.Ink),
             )
             Box(
-                Modifier.align(Alignment.Center).offset(y = (-(16 + 18)).dp - elevacion)
+                Modifier.align(Alignment.Center).offset(y = with(densidad) { (altoBarra / 2).toDp() } - (16 + 18).dp - elevacion)
                     .size(36.dp).shadow(4.dp, RoundedCornerShape(10.dp))
                     .clip(RoundedCornerShape(10.dp)).background(BuddyColor.Ink),
                 contentAlignment = Alignment.Center,
@@ -303,7 +354,7 @@ fun ElegirLugarEnMapa(
                 Icon(Icons.Filled.Place, contentDescription = null, tint = BuddyColor.InkInverse, modifier = Modifier.size(18.dp))
             }
             Column(
-                Modifier.align(Alignment.Center).offset(y = (-(16 + 36 + 8 + 20)).dp - elevacion)
+                Modifier.align(Alignment.Center).offset(y = with(densidad) { (altoBarra / 2).toDp() } - (16 + 36 + 8 + 20).dp - elevacion)
                     .widthIn(max = 240.dp)
                     .shadow(4.dp, RoundedCornerShape(12.dp))
                     .clip(RoundedCornerShape(12.dp)).background(Color.White)
@@ -318,76 +369,48 @@ fun ElegirLugarEnMapa(
             }
         }
 
-        // Barra superior: volver + instrucción. Flota sobre el mapa.
-        Column(
+        // Barra superior sólida (iOS, Keyla 25 Nov 2026): atrás + título; el mapa va debajo.
+        Box(
             Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = insetSuperior + 8.dp, start = 12.dp, end = 12.dp),
+                .fillMaxWidth()
+                .background(BuddyColor.Surface)
+                .padding(top = insetSuperior)
+                .height(56.dp)
+                .onGloballyPositioned { altoBarra = it.size.height },
+        ) {
+            Box(
+                Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(start = 12.dp)
+                    .size(40.dp)
+                    .shadow(4.dp, CircleShape)
+                    .clip(CircleShape)
+                    .background(BuddyColor.Surface)
+                    .clickable { android.util.Log.d(TAG, "volver"); onBack() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver",
+                     tint = BuddyColor.Brand, modifier = Modifier.size(20.dp))
+            }
+            Text(title, style = BuddyType.Headline, color = BuddyColor.Ink, modifier = Modifier.align(Alignment.Center))
+        }
+
+        // Acercar / alejar / mi ubicación, encima del panel (iOS).
+        Column(
+            Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = Spacing.edge, bottom = with(densidad) { altoPanel.toDp() } + 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier
-                        .size(40.dp)
-                        .shadow(4.dp, RoundedCornerShape(50))
-                        .clip(RoundedCornerShape(50))
-                        .background(BuddyColor.Surface)
-                        .clickable { android.util.Log.d(TAG, "volver"); onBack() },
-                    contentAlignment = Alignment.Center,
+            com.buddy.app.core.designsystem.components.MapControlButton(Icons.Filled.Add, "Acercar") { mapRef?.controller?.zoomIn() }
+            com.buddy.app.core.designsystem.components.MapControlButton(Icons.Filled.Remove, "Alejar") { mapRef?.controller?.zoomOut() }
+            if (initialLat != null && initialLng != null) {
+                com.buddy.app.core.designsystem.components.MapControlButton(
+                    androidx.compose.material.icons.Icons.Filled.Navigation, "Mi ubicación", iconRotation = 45f,
                 ) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver",
-                         tint = BuddyColor.Ink, modifier = Modifier.size(20.dp))
+                    mapRef?.controller?.animateTo(GeoPoint(initialLat, initialLng), 17.0, 400L)
                 }
-                Spacer(Modifier.width(10.dp))
-                BuddyTextField(
-                    value = consulta,
-                    onValueChange = { consulta = it },
-                    placeholder = "Buscar un lugar o dirección",
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            if (resultados.isNotEmpty()) {
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .shadow(4.dp, RoundedCornerShape(Radius.md))
-                        .clip(RoundedCornerShape(Radius.md))
-                        .background(BuddyColor.Surface),
-                ) {
-                    resultados.forEachIndexed { i, a ->
-                        val titulo = a.featureName ?: a.thoroughfare ?: a.locality ?: "Sin nombre"
-                        val sub = (0..a.maxAddressLineIndex).joinToString(", ") { a.getAddressLine(it) }
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    android.util.Log.d(TAG, "[t+${ms()}ms] búsqueda → \"$titulo\" (${a.latitude},${a.longitude})")
-                                    mapRef?.controller?.apply { setZoom(17.0); animateTo(GeoPoint(a.latitude, a.longitude)) }
-                                    selectedId = null
-                                    consulta = ""
-                                    resultados = emptyList()
-                                }
-                                .padding(horizontal = Spacing.md, vertical = 10.dp),
-                        ) {
-                            Text(titulo, style = BuddyType.FootnoteBold, color = BuddyColor.Ink, maxLines = 1,
-                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                            Text(sub, style = BuddyType.Caption1, color = BuddyColor.InkMuted, maxLines = 1,
-                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                        }
-                        if (i < resultados.size - 1) androidx.compose.material3.HorizontalDivider(color = BuddyColor.Border)
-                    }
-                }
-            } else if (tooWide) {
-                Text(
-                    "Acércate para ver los lugares",
-                    style = BuddyType.Footnote, color = BuddyColor.Ink,
-                    modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .shadow(4.dp, RoundedCornerShape(50))
-                        .clip(RoundedCornerShape(50))
-                        .background(BuddyColor.Surface)
-                        .padding(horizontal = 14.dp, vertical = 8.dp),
-                )
             }
         }
 
@@ -397,13 +420,88 @@ fun ElegirLugarEnMapa(
             Column(
                 Modifier
                     .align(Alignment.BottomCenter)
+                    // Con el teclado abierto el panel sube encima de él (resultados visibles).
+                    .imePadding()
+                    // El teclado tapaba la mitad del botón: un poco más de aire cuando está abierto.
+                    .padding(bottom = if (androidx.compose.foundation.layout.WindowInsets.isImeVisible) 36.dp else 0.dp)
                     .fillMaxWidth()
+                    .onGloballyPositioned { altoPanel = it.size.height }
                     .shadow(12.dp, RoundedCornerShape(topStart = Radius.lg, topEnd = Radius.lg))
                     .clip(RoundedCornerShape(topStart = Radius.lg, topEnd = Radius.lg))
                     .background(BuddyColor.Surface)
                     .padding(horizontal = Spacing.edge)
-                    .padding(top = Spacing.md, bottom = Spacing.md + insetInferior),
+                    // En el Dialog a pantalla completa el inset puede llegar en 0: mínimo 28 dp para la barra de gestos.
+                    .padding(top = Spacing.md, bottom = Spacing.md + maxOf(insetInferior, 28.dp)),
             ) {
+                if (elegido == null) {
+                    // Buscador dentro del panel, encima de "Nuevo lugar" (iOS).
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(50))
+                            .background(BuddyColor.SageTint.copy(alpha = 0.5f))
+                            .padding(horizontal = Spacing.md, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Search, contentDescription = null, tint = BuddyColor.InkMuted, modifier = Modifier.size(18.dp))
+                        androidx.compose.foundation.text.BasicTextField(
+                            value = consulta,
+                            onValueChange = { consulta = it },
+                            singleLine = true,
+                            textStyle = BuddyType.Callout.copy(color = BuddyColor.Ink),
+                            cursorBrush = androidx.compose.ui.graphics.SolidColor(BuddyColor.Brand),
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 10.dp, vertical = 10.dp)
+                                .onFocusChanged { buscadorActivo = it.isFocused },
+                            decorationBox = { inner ->
+                                if (consulta.isEmpty()) Text("Buscar un lugar o dirección", style = BuddyType.Callout, color = BuddyColor.InkFaint)
+                                inner()
+                            },
+                        )
+                        if (buscando) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = BuddyColor.Brand)
+                        if (consulta.isNotEmpty()) {
+                            Spacer(Modifier.width(8.dp))
+                            Icon(Icons.Filled.Cancel, contentDescription = "Borrar búsqueda", tint = BuddyColor.InkFaint,
+                                 modifier = Modifier.size(20.dp).clip(CircleShape).clickable { consulta = ""; resultados = emptyList() })
+                        }
+                    }
+                    if (resultados.isNotEmpty()) {
+                        Spacer(Modifier.height(Spacing.sm))
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(Radius.md))
+                                .border(1.dp, BuddyColor.Border, RoundedCornerShape(Radius.md))
+                                .background(BuddyColor.Surface),
+                        ) {
+                            resultados.take(4).forEachIndexed { i, a ->
+                                val titulo = a.featureName ?: a.thoroughfare ?: a.locality ?: "Sin nombre"
+                                val sub = (0..a.maxAddressLineIndex).joinToString(", ") { a.getAddressLine(it) }
+                                Column(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            android.util.Log.d(TAG, "[t+${ms()}ms] búsqueda → \"$titulo\" (${a.latitude},${a.longitude})")
+                                            mapRef?.controller?.apply { setZoom(17.0); animateTo(GeoPoint(a.latitude, a.longitude)) }
+                                            selectedId = null
+                                            consulta = ""
+                                            resultados = emptyList()
+                                            focusManager.clearFocus()
+                                        }
+                                        .padding(horizontal = Spacing.md, vertical = 10.dp),
+                                ) {
+                                    Text(titulo, style = BuddyType.FootnoteBold, color = BuddyColor.Ink, maxLines = 1,
+                                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                    Text(sub, style = BuddyType.Caption1, color = BuddyColor.InkMuted, maxLines = 1,
+                                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                }
+                                if (i < minOf(resultados.size, 4) - 1) androidx.compose.material3.HorizontalDivider(color = BuddyColor.Border)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(Spacing.md))
+                }
                 if (elegido != null) {
                     Text(
                         if (elegido.estaPendiente) "LUGAR POR REVISAR" else "LUGAR EN EL MAPA",
@@ -416,7 +514,7 @@ fun ElegirLugarEnMapa(
                     }
                     Spacer(Modifier.height(Spacing.md))
                     BotonPrincipal(
-                        texto = "Elegir este lugar",
+                        texto = if (fixedName != null) "Es mi negocio" else "Elegir este lugar",
                         habilitado = !isSubmitting,
                         cargando = false,
                         onClick = {
@@ -433,12 +531,14 @@ fun ElegirLugarEnMapa(
                         },
                     )
                 } else {
-                    Text("NUEVO LUGAR", style = BuddyType.Eyebrow, color = BuddyColor.InkMuted)
-                    Spacer(Modifier.height(Spacing.sm))
+                    if (fixedName == null) {
+                        Text("NUEVO LUGAR", style = BuddyType.Eyebrow, color = BuddyColor.InkMuted)
+                        Spacer(Modifier.height(Spacing.sm))
+                    }
                     BuddyTextField(
                         value = nombre,
                         onValueChange = { nombre = it },
-                        placeholder = "¿Cómo se llama? Ej. Cafetería Rosal",
+                        placeholder = if (fixedName != null) "Nombre del lugar" else "¿Cómo se llama? Ej. Cafetería Rosal",
                         modifier = Modifier.fillMaxWidth(),
                     )
                     if (categories.isNotEmpty()) {
@@ -469,7 +569,7 @@ fun ElegirLugarEnMapa(
                     }
                     Spacer(Modifier.height(Spacing.md))
                     BotonPrincipal(
-                        texto = "Compartir aquí",
+                        texto = if (fixedName != null) "Guardar ubicación" else "Compartir aquí",
                         habilitado = nombre.trim().isNotEmpty() && !isSubmitting && centro != null && !moviendo,
                         cargando = isSubmitting,
                         onClick = {
@@ -532,15 +632,34 @@ private fun direccionDe(contexto: android.content.Context, lat: Double, lng: Dou
         calle.ifEmpty { a.featureName ?: a.locality }
     }.getOrNull()
 
-/** Busca por texto cerca de lo que el mapa muestra: "café" debe encontrar los de aquí. */
+/**
+ * Busca por texto cerca de lo que el mapa muestra: "café" debe encontrar los de aquí.
+ * Si nada cercano coincide, también busca en todo el Perú (del más cercano al más
+ * lejano) y prueba sin el número: "Francisco Arana 218" → "Francisco Arana" (iOS).
+ */
 @Suppress("DEPRECATION")
-private fun buscarLugar(contexto: android.content.Context, texto: String, lat: Double?, lng: Double?): List<android.location.Address> =
+private fun buscarLugar(contexto: android.content.Context, texto: String, lat: Double?, lng: Double?, span: Double = 0.0): List<android.location.Address> =
     runCatching {
         if (!android.location.Geocoder.isPresent()) {
             android.util.Log.w(TAG, "búsqueda: Geocoder NO disponible en este dispositivo")
             return emptyList()
         }
-        val g = android.location.Geocoder(contexto, java.util.Locale.getDefault())
-        if (lat != null && lng != null) g.getFromLocationName(texto, 5, lat - 0.5, lng - 0.5, lat + 0.5, lng + 0.5)
-        else g.getFromLocationName(texto, 5)
+        val g = android.location.Geocoder(contexto, java.util.Locale("es", "PE"))
+        val d = maxOf(0.5, span * 0.75)
+        val cerca = if (lat != null && lng != null) runCatching { g.getFromLocationName(texto, 5, lat - d, lng - d, lat + d, lng + d) }.getOrNull().orEmpty() else emptyList()
+        val palabras = texto.lowercase().split(" ").filter { w -> w.isNotBlank() && w.none { it.isDigit() } }
+        fun coincide(a: android.location.Address): Boolean {
+            val n = listOfNotNull(a.featureName, a.thoroughfare, a.getAddressLine(0)).joinToString(" ").lowercase()
+            return palabras.all { n.contains(it) }
+        }
+        if (cerca.any(::coincide)) return cerca
+        // Todo el Perú, y sin números.
+        val peru = runCatching { g.getFromLocationName(texto, 5, -18.4, -81.4, 0.0, -68.6) }.getOrNull().orEmpty()
+        val corto = palabras.joinToString(" ")
+        val sinNumero = if (corto.length >= 2 && corto != texto.lowercase())
+            runCatching { g.getFromLocationName(corto, 5, -18.4, -81.4, 0.0, -68.6) }.getOrNull().orEmpty() else emptyList()
+        fun dist(a: android.location.Address) = if (lat == null || lng == null) 0.0 else
+            GeoPoint(lat, lng).distanceToAsDouble(GeoPoint(a.latitude, a.longitude))
+        val todos = (cerca + peru + sinNumero).distinctBy { "${it.latitude}|${it.longitude}" }
+        todos.filter(::coincide).sortedBy(::dist) + todos.filterNot(::coincide).sortedBy(::dist)
     }.onFailure { android.util.Log.e(TAG, "búsqueda \"$texto\" FALLÓ", it) }.getOrNull().orEmpty()

@@ -124,56 +124,40 @@ fun CompartirLugarSheet(
     }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.padding(horizontal = Spacing.edge).padding(bottom = Spacing.lg)) {
-            Text("Compartir un lugar", style = BuddyType.Title3, color = BuddyColor.Ink)
+            Text("Recomendar un lugar", style = BuddyType.Title3, color = BuddyColor.Ink)
             Spacer(Modifier.height(Spacing.md))
 
             when (step) {
                 ShareLugarStep.Choose -> {
-                    Text("¿DÓNDE ESTÁS AHORA?", style = BuddyType.Eyebrow, color = BuddyColor.InkMuted)
-                    Spacer(Modifier.height(Spacing.sm))
-
-                    nearbySpots.firstOrNull()?.let { actual ->
-                        optionRow(
-                            icon = Icons.Filled.LocationOn,
-                            title = "${actual.name} (Lugar actual)",
-                            subtitle = if (actual.estaPendiente) "${actual.distanciaLabel} · por revisar" else actual.distanciaLabel,
-                            isLoading = isSubmitting,
-                            enabled = !isSubmitting,
-                            onClick = { onPickSpot(actual) },
-                        )
-                        Spacer(Modifier.height(Spacing.sm))
-
-                        // Los demás dentro del radio: el GPS puede errar por unos
-                        // metros y dos locales caben en ese margen.
-                        nearbySpots.drop(1).take(4).forEach { spot ->
-                            optionRow(
-                                icon = Icons.Filled.Place,
-                                title = spot.name,
-                                subtitle = if (spot.estaPendiente) "${spot.distanciaLabel} · por revisar" else spot.distanciaLabel,
-                                isLoading = false,
-                                enabled = !isSubmitting,
-                                onClick = { onPickSpot(spot) },
-                            )
-                            Spacer(Modifier.height(Spacing.sm))
+                    // Pregunta en positivo y la tarjeta de "Cerca de ti" (iOS, 25 Nov 2026).
+                    Text("¿Qué lugar te encantó?", style = BuddyType.Title3, color = BuddyColor.Ink)
+                    Spacer(Modifier.height(4.dp))
+                    Text("Recomienda un sitio donde tuviste una buena experiencia.",
+                         style = BuddyType.Footnote, color = BuddyColor.InkMuted)
+                    Spacer(Modifier.height(Spacing.md))
+                    if (nearbySpots.isNotEmpty()) {
+                        Row(
+                            Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            nearbySpots.take(5).forEach { spot ->
+                                Box(Modifier.clickable(enabled = !isSubmitting) { onPickSpot(spot) }) {
+                                    com.buddy.app.features.home.inicio.PlaceCard(
+                                        card = com.buddy.app.core.data.model.ApiPlaceCard(
+                                            id = spot.id, name = spot.name,
+                                            destinationId = spot.destinationId,
+                                            destinationName = spot.destination?.name,
+                                            lat = spot.lat, lng = spot.lng,
+                                            distanceMeters = spot.distanceMeters,
+                                            coverUrl = spot.coverUrl, status = spot.status,
+                                        ),
+                                        large = false, tall = true, showsDistance = true,
+                                    )
+                                }
+                            }
                         }
+                        Spacer(Modifier.height(Spacing.md))
                     }
-
-                    // Siempre presente, haya lista o no: el buddy puede estar en
-                    // un local que el catálogo todavía no conoce, y buscarlo por
-                    // texto no sirve — si no está aquí, tampoco está en el mapa.
-                    optionRow(
-                        icon = Icons.Filled.AddCircle,
-                        title = "Registrar lugar de la ubicación actual",
-                        subtitle = when {
-                            nearbySpots.isNotEmpty() -> "ninguno de estos es"
-                            isPrefetchingNearby -> "buscando…"
-                            else -> "nombra dónde estás"
-                        },
-                        isLoading = false,
-                        enabled = !isSubmitting && !isPrefetchingNearby,
-                        onClick = { onStep(ShareLugarStep.Propose) },
-                    )
-                    Spacer(Modifier.height(Spacing.sm))
                     optionRow(
                         icon = Icons.Filled.Map,
                         title = "Buscar en el mapa",

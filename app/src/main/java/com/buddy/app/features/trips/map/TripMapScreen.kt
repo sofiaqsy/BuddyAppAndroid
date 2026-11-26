@@ -2,6 +2,7 @@ package com.buddy.app.features.trips.map
 
 import okhttp3.MediaType.Companion.toMediaType
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -118,6 +119,25 @@ class TripMapViewModel @Inject constructor(
     suspend fun coordenadas(destinationId: String): Pair<Double, Double>? =
         runCatching { mapApi.destination(destinationId).let { it.lat to it.lng } }.getOrNull()
 
+    /** Sube UNA foto de la recomendación (hasta 3 intentos); el servidor guarda por client_page_id. */
+    suspend fun subirFotoRecomendacion(journeyId: String, jpeg: ByteArray): Boolean = withContext(Dispatchers.IO) {
+        val id = java.util.UUID.randomUUID().toString()
+        val parts = listOf(
+            okhttp3.MultipartBody.Part.createFormData("page_0", "page_0.jpg",
+                okhttp3.RequestBody.create("image/jpeg".toMediaType(), jpeg)),
+            okhttp3.MultipartBody.Part.createFormData("client_page_id_0", id),
+        )
+        repeat(3) { intento ->
+            if (runCatching { homeApi.uploadJourneyPages(journeyId, parts) }.isSuccess) return@withContext true
+            kotlinx.coroutines.delay(2000L * (intento + 1))
+        }
+        false
+    }
+
+    suspend fun publicarRecomendacion(journeyId: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching { homeApi.publishJourney(journeyId, com.buddy.app.features.home.data.PublishBody(status = "completed", isPublic = true)) }.isSuccess
+    }
+
     /** La recomendación de un lugar: journey suelto (trip_id nulo) sobre el
      *  spot. Nace al tocar "Añadir foto", no al elegir el lugar. */
     suspend fun crearRecomendacion(spotId: String, lat: Double, lng: Double): ApiJourney? =
@@ -159,6 +179,8 @@ fun TripMapScreen(
     /** El editor de fotos, con el journey recién creado para este lugar. */
     onOpenBook: (ApiJourney, Int, Boolean) -> Unit = { _, _, _ -> },
     onBack: () -> Unit,
+    /** Abierto desde "Recomendar un lugar": Fotos primero y "Añadir foto" va directo al selector. */
+    recommendMode: Boolean = false,
     viewModel: TripMapViewModel = hiltViewModel(),
 ) {
     val destName = journey.destination?.name ?: journey.title ?: "Trip"
@@ -275,6 +297,30 @@ fun TripMapScreen(
         val id = selectedSpotId
         ownerPhotos = if (id != null && ownerSpots.containsKey(id.lowercase()))
             runCatching { businessApi.ownerPhotos(id).photos.sortedBy { it.position } }.getOrDefault(emptyList()) else emptyList()
+    }
+    // Recomendar sin editor (Keyla, 25 Nov 2026): elegir fotos crea la
+    // recomendación y las sube una por una, con reintentos, mostrando el avance.
+    var subida by remember { mutableStateOf<String?>(null) }
+    var subidaSpot by remember { mutableStateOf<ApiGuideSpot?>(null) }
+    val recommendPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(10)) { uris ->
+        val spot = subidaSpot
+        if (uris.isNotEmpty() && spot != null) scope.launch {
+            subida = "Subiendo tu foto…"
+            val journey = withContext(Dispatchers.IO) { viewModel.crearRecomendacion(spot.id, spot.lat, spot.lng) }
+            if (journey == null) { subida = "No se pudo subir. Revisa tu señal."; return@launch }
+            var ok = 0
+            uris.forEachIndexed { i, uri ->
+                subida = if (uris.size > 1) "Subiendo foto ${i + 1} de ${uris.size}…" else "Subiendo tu foto…"
+                val jpeg = runCatching { withContext(Dispatchers.IO) { com.buddy.app.features.business.Jpeg.from(ctxOwner, uri) } }.getOrNull()
+                if (jpeg != null && viewModel.subirFotoRecomendacion(journey.id, jpeg)) ok++
+            }
+            if (ok > 0 && viewModel.publicarRecomendacion(journey.id)) {
+                fotosToken++
+                subida = "Listo, tu publicación ya está arriba"
+                kotlinx.coroutines.delay(3000); subida = null
+            } else subida = "No se pudo subir la foto. Revisa tu señal."
+        }
     }
     val photoPicker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -543,24 +589,39 @@ fun TripMapScreen(
                 },
             )
             // Botón "mi ubicación", siempre por encima del panel (iOS).
-            if (!sheet.expanded) Box(
-                Modifier
+            if (!sheet.expanded) com.buddy.app.core.designsystem.components.MapControlButton(
+                icon = androidx.compose.material.icons.Icons.Filled.Navigation,
+                label = "Ir a mi ubicación",
+                iconRotation = 45f,
+                modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = with(density) { sheet.height.value.toDp() } + 28.dp)
-                    .size(52.dp)
-                    .shadow(6.dp, RoundedCornerShape(16.dp))
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFFFFFBF2))
-                    .clickable {
-                        myLoc?.myLocation?.let { mapRef?.controller?.animateTo(it, ZoomLugar, DuracionZoomMs) }
+                    .padding(end = 16.dp, bottom = with(density) { sheet.height.value.toDp() } + 28.dp),
+            ) { myLoc?.myLocation?.let { mapRef?.controller?.animateTo(it, ZoomLugar, DuracionZoomMs) } }
+            // Aviso de subida de fotos (iOS UploadStatusBanner).
+            subida?.let { msg ->
+                Row(
+                    Modifier
+                        .align(Alignment.TopCenter)
+                        .windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.statusBars)
+                        .padding(top = 64.dp, start = 16.dp, end = 16.dp)
+                        .fillMaxWidth()
+                        .shadow(6.dp, RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(BuddyColor.Surface)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    if (msg.startsWith("Subiendo")) androidx.compose.material3.CircularProgressIndicator(
+                        Modifier.size(18.dp), strokeWidth = 2.dp, color = BuddyColor.Brand)
+                    Column(Modifier.weight(1f)) {
+                        Text(msg, style = BuddyType.Headline, color = BuddyColor.Ink)
+                        if (msg.startsWith("Subiendo")) Text("Con señal lenta puede tardar un poco.",
+                            style = BuddyType.Footnote, color = BuddyColor.InkMuted)
                     }
-                    .semantics { contentDescription = "Ir a mi ubicación" },
-                contentAlignment = Alignment.Center,
-            ) {
-                androidx.compose.material3.Icon(
-                    androidx.compose.material.icons.Icons.Filled.Navigation, contentDescription = null,
-                    tint = Color.Black, modifier = Modifier.size(24.dp).graphicsLayer { rotationZ = 45f },
-                )
+                    if (msg.startsWith("No se pudo")) Text("Cerrar", style = BuddyType.FootnoteBold, color = BuddyColor.Brand,
+                        modifier = Modifier.clickable { subida = null })
+                }
             }
             // Con el panel abierto no hay mapa a la vista: el crédito se oculta.
             if (!sheet.expanded) Text(
@@ -744,15 +805,13 @@ fun TripMapScreen(
                         },
                         gridState = panelGrid,
                         onAddPhoto = {
-                            // AQUÍ nace el journey, no al elegir el lugar: hasta
-                            // este toque el usuario solo estaba mirando la ficha.
-                            scope.launch {
-                                val journey = withContext(Dispatchers.IO) {
-                                    viewModel.crearRecomendacion(spot.id, spot.lat, spot.lng)
-                                }
-                                if (journey != null) onOpenBook(journey, -1, true)
-                            }
+                            // Directo al selector de fotos, sin editor (iOS, 25 Nov 2026).
+                            // El journey nace al elegir las fotos, no al abrir la ficha.
+                            subidaSpot = spot
+                            recommendPicker.launch(androidx.activity.result.PickVisualMediaRequest(
+                                androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
                         },
+                        startOnPhotos = recommendMode,
                         onNavigate = { navigationTarget = spot },
                         onOpenPhoto = { fotoAmpliada = it },
                     )

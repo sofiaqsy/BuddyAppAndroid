@@ -98,6 +98,9 @@ fun TripsScreen(
     embedded: Boolean = false,
     /** Abre el chat de un match directamente (overlay de BuddyRoot). */
     onOpenChat: (matchId: String) -> Unit = {},
+    /** Trip cancelado: el overlay de Yo se cierra al instante, sin esperar
+     *  al servidor (iOS cancelActiveTrip, Keyla 26 Nov 2026). */
+    onTripCancelled: () -> Unit = {},
     viewModel: TripsViewModel = hiltViewModel(),
 ) {
     val state by viewModel.state.collectAsState()
@@ -205,10 +208,13 @@ fun TripsScreen(
             Row(Modifier.fillMaxWidth().padding(horizontal = Spacing.edge, vertical = Spacing.sm),
                 verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Tus trips", style = BuddyType.DisplayXL, color = BuddyColor.Brand)
+                    Text(if (state.selectedTrip != null) "Tu trip en curso" else "Tus trips", style = BuddyType.DisplayXL, color = BuddyColor.Brand)
                     Text("Tu bitácora de viaje", style = BuddyType.Footnote, color = BuddyColor.InkMuted)
                 }
-                if (state.selectedTrip != null) {
+                // Sin "+ Nuevo trip" con un trip en curso: el servidor añadiría el
+                // lugar nuevo a ESE trip y cancelarlo después se llevaría ambos.
+                // Igual que iOS (Keyla, 26 Nov 2026).
+                if (false) {
                     Row(Modifier.height(36.dp).clip(RoundedCornerShape(50)).background(BuddyColor.Brand)
                             .clickable(onClick = viewModel::openRegister).padding(horizontal = 14.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -326,7 +332,7 @@ fun TripsScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { showCancelConfirm = false; viewModel.cancelSelectedTrip() }) {
+                TextButton(onClick = { showCancelConfirm = false; viewModel.cancelSelectedTrip(); if (embedded) onTripCancelled() }) {
                     Text("Cancelar trip", color = BuddyColor.ErrorRed, style = BuddyType.FootnoteBold)
                 }
             },

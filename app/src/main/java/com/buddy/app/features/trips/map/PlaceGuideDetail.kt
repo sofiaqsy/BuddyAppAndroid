@@ -99,9 +99,11 @@ fun PlaceGuideDetail(
     onAsk: (FincasProduct?, FincasProduct.Presentation?) -> Unit = { _, _ -> },
     /** El producto que va primero (tocado en Inicio), para que el visor use el mismo orden. */
     onFocus: (String?) -> Unit = {},
+    /** Desde "Recomendar un lugar": abre en Fotos con "Añadir foto" (Keyla, 25 Nov 2026). */
+    startOnPhotos: Boolean = false,
 ) {
-    var tab by remember(spot.id) { mutableStateOf(0) }
-    var userPickedTab by remember(spot.id) { mutableStateOf(false) }
+    var tab by remember(spot.id) { mutableStateOf(if (startOnPhotos) 2 else 0) }
+    var userPickedTab by remember(spot.id) { mutableStateOf(startOnPhotos) }
     // Sin productos: Fotos primero y abre en Fotos (iOS, 24 Nov 2026).
     // Solo después de que la carga empezó y terminó: antes de empezar, la
     // lista vacía no quiere decir "sin productos".

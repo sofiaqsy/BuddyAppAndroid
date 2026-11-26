@@ -436,9 +436,12 @@ fun PlaceCard(card: ApiPlaceCard, large: Boolean, showsCategory: Boolean = true,
               /** Foto vertical 4:5 con categoría ("Más para descubrir", 23 Nov 2026). */
               tall: Boolean = false,
               /** Distancia también en tarjetas altas: "Cerca de ti" (Keyla, 24 Nov 2026). */
-              showsDistance: Boolean = false) {
-    val portrait = tall || (!showsCategory && !large)
-    val width = if (large) 264.dp else if (portrait) 150.dp else 168.dp
+              showsDistance: Boolean = false,
+              /** Ancho propio para filas compactas (perfil, Keyla 25 Nov 2026); misma forma 4:5. */
+              widthOverride: androidx.compose.ui.unit.Dp? = null) {
+    // Mismas medidas para todas las tarjetas de lugar: las de "Cerca de ti" (Keyla, 25 Nov 2026).
+    val portrait = !large
+    val width = widthOverride ?: if (large) 264.dp else if (portrait) 150.dp else 168.dp
     val ratio = if (portrait) 4f / 5f else 4f / 3f
     val shape = RoundedCornerShape(CardCorner)
     val sizeMod = if (fillWidth) Modifier.fillMaxWidth() else Modifier.width(width)
