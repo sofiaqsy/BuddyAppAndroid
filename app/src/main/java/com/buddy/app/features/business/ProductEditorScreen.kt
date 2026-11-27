@@ -78,6 +78,13 @@ fun ProductEditorScreen(
     addPresentation: Boolean = false,
     onClose: (changed: Boolean) -> Unit,
 ) {
+    // Producto nuevo: el flujo de 2 pasos, igual que iOS (Keyla, 26 Nov 2026).
+    if (product == null && focusPresentationId == null && !addPresentation) {
+        NewProductFlowScreen(farmId, modifier, onClose = onClose); return
+    }
+    if (product != null && addPresentation) {
+        NewProductFlowScreen(farmId, modifier, existing = product, onClose = onClose); return
+    }
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var name by remember { mutableStateOf(product?.name.orEmpty()) }
@@ -108,7 +115,14 @@ fun ProductEditorScreen(
     var changedSomething by remember { mutableStateOf(false) }
     val productKey = remember { UUID.randomUUID().toString() }
     var createdId by remember { mutableStateOf(product?.id) }
-    BackHandler(enabled = !saving) { onClose(changedSomething) }
+    // Nuevo producto en 2 pasos (Keyla, 26 Nov 2026): 1 Foto (4:5, como en Inicio), 2 Nombre y precio.
+    val stepped = product == null && focusKey == null
+    var step by remember { mutableStateOf(if (stepped) 1 else 2) }
+    val firstPhotoPicker = com.buddy.app.core.designsystem.components.rememberPhotoCapture { uris ->
+        uris.firstOrNull()?.let { sizes.first().newPhoto = it }
+    }
+    fun back() { if (stepped && step == 2) step = 1 else onClose(changedSomething) }
+    BackHandler(enabled = !saving) { back() }
 
     fun save() {
         error = null
@@ -149,7 +163,7 @@ fun ProductEditorScreen(
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier.size(44.dp).shadow(6.dp, CircleShape).clip(CircleShape).background(BuddyColor.Surface)
-                    .clickable(enabled = !saving) { onClose(changedSomething) }.semantics { contentDescription = "Atrás" },
+                    .clickable(enabled = !saving) { back() }.semantics { contentDescription = "Atrás" },
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, null, tint = BuddyColor.Brand, modifier = Modifier.size(20.dp)) }
             Spacer(Modifier.width(12.dp))
@@ -163,16 +177,36 @@ fun ProductEditorScreen(
                     },
                     style = BuddyType.Title3, color = BuddyColor.Ink,
                 )
+                if (stepped) Text("Paso $step de 2 · " + if (step == 1) "Foto del producto" else "Nombre y precio",
+                    style = BuddyType.Footnote, color = BuddyColor.InkMuted)
                 if (focusKey != null) Text(name, style = BuddyType.Footnote, color = BuddyColor.InkMuted)
             }
         }
         Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
+            Modifier.weight(1f).then(if (step == 1) Modifier else Modifier.verticalScroll(rememberScrollState())).padding(horizontal = 20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+          if (step == 1) {
+            val photo = sizes.first().newPhoto
+            // La foto abajo, al alcance del pulgar (Keyla, 26 Nov 2026).
+            Spacer(Modifier.weight(1f))
+            Box(
+                Modifier.align(Alignment.CenterHorizontally).size(148.dp)
+                    .clip(RoundedCornerShape(10.dp)).background(BuddyColor.SageTint)
+                    .clickable { firstPhotoPicker() }
+                    .semantics { contentDescription = if (photo == null) "Elegir foto" else "Cambiar foto" },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (photo != null) AsyncImage(photo, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                else Box(Modifier.size(52.dp).clip(CircleShape).background(BuddyColor.Brand), contentAlignment = Alignment.Center) {
+                    Text("+", style = BuddyType.Title3, color = BuddyColor.InkInverse)
+                }
+            }
+          } else {
             if (focusKey == null) {
                 Field("Nombre", name, { name = it })
-                Field("Descripción (opcional)", description, { description = it.take(500) }, singleLine = false)
+                // Sin descripción al crear (Keyla, 26 Nov 2026).
+                if (product != null) Field("Descripción (opcional)", description, { description = it.take(500) }, singleLine = false)
                 Text("Tamaños y precios", style = BuddyType.Headline, color = BuddyColor.Ink)
             }
             shownSizes.forEach { s ->
@@ -207,16 +241,18 @@ fun ProductEditorScreen(
                 )
             }
             Spacer(Modifier.height(8.dp))
+          }
         }
         error?.let { Text(it, style = BuddyType.Footnote, color = BuddyColor.ErrorRed, modifier = Modifier.padding(horizontal = 20.dp)) }
+        val canGo = !saving && (step == 2 || sizes.first().newPhoto != null)
         Box(
             Modifier.padding(20.dp).fillMaxWidth().height(52.dp).clip(CircleShape)
-                .background(if (saving) BuddyColor.BrandDisabled else BuddyColor.Brand)
-                .clickable(enabled = !saving) { save() },
+                .background(if (canGo) BuddyColor.Brand else BuddyColor.BrandDisabled)
+                .clickable(enabled = canGo) { if (step == 1) step = 2 else save() },
             contentAlignment = Alignment.Center,
         ) {
             if (saving) CircularProgressIndicator(Modifier.size(22.dp), color = BuddyColor.InkInverse, strokeWidth = 2.dp)
-            else Text(if (product == null) "Crear producto" else "Guardar cambios", style = BuddyType.FootnoteBold, color = BuddyColor.InkInverse)
+            else Text(if (step == 1) "Siguiente" else if (product == null) "Crear producto" else "Guardar cambios", style = BuddyType.FootnoteBold, color = BuddyColor.InkInverse)
         }
     }
 
@@ -282,16 +318,16 @@ private fun SizeCard(s: SizeDraft, removable: Boolean, onRemove: () -> Unit, onR
             }
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Field("Tamaño", s.size, { s.size = it }, number = true, modifier = Modifier.weight(1f))
+                    Field("Cantidad", s.size, { s.size = it }, number = true, modifier = Modifier.weight(1f))
                     Box(Modifier.weight(1f)) {
-                        Field("Unidad", s.unit, {}, readOnly = true, modifier = Modifier.fillMaxWidth())
+                        Field("Medida", s.unit, {}, readOnly = true, modifier = Modifier.fillMaxWidth())
                         Box(Modifier.matchParentSize().clickable { unitOpen = true })
                         DropdownMenu(expanded = unitOpen, onDismissRequest = { unitOpen = false }) {
                             UNITS.forEach { u -> DropdownMenuItem(text = { Text(u) }, onClick = { s.unit = u; unitOpen = false }) }
                         }
                     }
                 }
-                Field("Precio (S/)", s.price, { s.price = it }, number = true)
+                Field("Precio", s.price, { s.price = it }, number = true, prefix = "S/")
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -307,9 +343,10 @@ private fun SizeCard(s: SizeDraft, removable: Boolean, onRemove: () -> Unit, onR
 
 @Composable
 private fun Field(label: String, value: String, onChange: (String) -> Unit, modifier: Modifier = Modifier.fillMaxWidth(),
-                  singleLine: Boolean = true, number: Boolean = false, readOnly: Boolean = false) {
+                  singleLine: Boolean = true, number: Boolean = false, readOnly: Boolean = false, prefix: String? = null) {
     OutlinedTextField(
         value = value, onValueChange = onChange, label = { Text(label) }, singleLine = singleLine, readOnly = readOnly,
+        prefix = prefix?.let { p -> { Text("$p ") } },
         minLines = if (singleLine) 1 else 3, modifier = modifier,
         keyboardOptions = KeyboardOptions(keyboardType = if (number) KeyboardType.Decimal else KeyboardType.Text),
         shape = RoundedCornerShape(14.dp),
@@ -319,6 +356,8 @@ private fun Field(label: String, value: String, onChange: (String) -> Unit, modi
 }
 
 /** JPEG de máx. 1600 px a 0.8, como iOS. */
+internal fun productJpeg(ctx: android.content.Context, uri: Uri): ByteArray = toJpeg(ctx, uri)
+
 private fun toJpeg(ctx: android.content.Context, uri: Uri): ByteArray {
     val src = ctx.contentResolver.openInputStream(uri).use { BitmapFactory.decodeStream(it) }
         ?: throw FincasAuth.FincasError("No pudimos leer la foto.")

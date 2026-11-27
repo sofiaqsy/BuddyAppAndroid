@@ -1,5 +1,6 @@
 package com.buddy.app.features.business
 
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -239,6 +240,8 @@ fun BusinessHomeScreen(
     LaunchedEffect(farmId) { vm.load(farmId) }
     val s by vm.state.collectAsState()
     var section by remember { mutableIntStateOf(0) }   // 0 Mi negocio · 1 Productos
+    // Guarda el estado de "Mi negocio" al cambiar de pestaña: vuelve igual que estaba (Keyla, 26 Nov 2026).
+    val sectionState = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     var inviting by remember { mutableStateOf(false) }
     // "+" de Ubicaciones: el mapa para elegir la sede (iOS BusinessLocationPicker).
     var addingLocation by remember { mutableStateOf(false) }
@@ -349,7 +352,7 @@ fun BusinessHomeScreen(
             }
         }
         if (section == 0) {
-            item {
+            item(key = "mi-negocio") { sectionState.SaveableStateProvider("mi-negocio") {
                 MiNegocio(farmId, business.name, s, isLinked = true, onShowProducts = { section = 1 },
                     onAddLocation = { addingLocation = true },
                     onSetMain = { sp -> vm.setMain(farmId, sp.id) },
@@ -362,11 +365,11 @@ fun BusinessHomeScreen(
                     onEditHours = { sp -> editingHours = sp },
                     onSaveProfile = { a, c -> vm.saveProfile(farmId, a, c) },
                 ) { main, extra -> vm.saveCats(farmId, main, extra) }
-            }
+            } }
         } else {
             item {
                 Text(
-                    "+ Añadir producto", style = BuddyType.FootnoteBold, color = BuddyColor.InkInverse,
+                    "+ Nuevo producto", style = BuddyType.FootnoteBold, color = BuddyColor.InkInverse,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().height(50.dp).clip(CircleShape).background(BuddyColor.Brand)
                         .clickable { editing = ProductEdit(null) }.wrapContentHeight(),
@@ -493,14 +496,38 @@ private fun ProductRow(p: FincasProduct, onEdit: () -> Unit, onEditPresentation:
                     .background(BuddyColor.InkMuted.copy(alpha = 0.15f)))
             }
         }
-        Row(
-            Modifier.padding(top = 4.dp).fillMaxWidth().height(40.dp).clip(CircleShape).background(BuddyColor.SageTint)
-                .clickable(onClick = onAddPresentation),
-            horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(Icons.Filled.Add, null, tint = BuddyColor.Brand, modifier = Modifier.size(16.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("Agregar presentación", style = BuddyType.FootnoteBold, color = BuddyColor.Brand)
+        // Botón más angosto y un "?" que explica qué es una presentación (Keyla, 26 Nov 2026).
+        Row(Modifier.padding(top = 4.dp).fillMaxWidth(), horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                Modifier.height(40.dp).clip(CircleShape).background(BuddyColor.SageTint)
+                    .clickable(onClick = onAddPresentation).padding(horizontal = 18.dp),
+                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Add, null, tint = BuddyColor.Brand, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Nueva presentación", style = BuddyType.FootnoteBold, color = BuddyColor.Brand)
+            }
+            PresentationHelpButton()
+        }
+    }
+}
+
+@Composable
+private fun PresentationHelpButton() {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { open = true }, modifier = Modifier.semantics { contentDescription = "¿Qué es una presentación?" }) {
+            Icon(Icons.AutoMirrored.Outlined.HelpOutline, null, tint = BuddyColor.Brand)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            Column(Modifier.width(280.dp).padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("¿Qué es una presentación?", style = BuddyType.FootnoteBold, color = BuddyColor.Ink)
+                Text("Es otra forma de vender el mismo producto: otro tamaño o empaque, con su precio y su foto.",
+                     style = BuddyType.Footnote, color = BuddyColor.Ink)
+                Text("Ej. Café en bolsa de 250 g a S/ 20 y en bolsa de 1 kg a S/ 60.",
+                     style = BuddyType.Footnote, color = BuddyColor.InkMuted)
+            }
         }
     }
 }
@@ -559,13 +586,13 @@ private fun MiNegocio(farmId: String, businessName: String, s: BusinessHomeViewM
     // Lo publicado en el servidor (el ViewModel ya subió lo que solo estaba en el teléfono).
     val savedAbout = s.about
     val savedContact = s.contact
-    var about by remember(farmId, savedAbout) { mutableStateOf(savedAbout) }
+    var about by androidx.compose.runtime.saveable.rememberSaveable(farmId, savedAbout) { mutableStateOf(savedAbout) }
     var contact by remember(farmId, savedContact) { mutableStateOf(savedContact) }
-    var hoursOpen by remember { mutableStateOf(true) }
+    var hoursOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
     var main by remember(s.categories) { mutableStateOf(s.categories?.main) }
     var extra by remember(s.categories) { mutableStateOf(s.categories?.secondary.orEmpty()) }
-    var locationsOpen by remember { mutableStateOf(true) }
-    var generalOpen by remember { mutableStateOf(true) }
+    var locationsOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
+    var generalOpen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(true) }
     /** Tocó la alerta "Obligatorio": Ubicaciones en rojo hasta tener una (iOS). */
     var flagLocations by remember { mutableStateOf(false) }
 
